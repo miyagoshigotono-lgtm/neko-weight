@@ -85,7 +85,7 @@ function renderHome() {
   // Pet scroll
   const scroll = document.getElementById('home-pet-scroll');
   if (state.pets.length === 0) {
-    scroll.innerHTML = `<div style="padding:12px 0;color:var(--muted);font-size:13px;white-space:nowrap;padding-left:4px;">ねこを登録してにゃ 🐾</div>`;
+    scroll.innerHTML = `<div style="padding:12px 0;color:var(--muted);font-size:13px;white-space:nowrap;padding-left:4px;">ねこを登録してください 🐾</div>`;
     return;
   }
   scroll.innerHTML = state.pets.map(pet => {
@@ -176,7 +176,7 @@ function closeInputModal() {
 function confirmMeasure() {
   const val = parseFloat(document.getElementById('weight-input').value);
   if (isNaN(val) || val <= 0) {
-    showToast('体重を入力してにゃ 🐱');
+    showToast('体重を入力してください 🐕');
     return;
   }
   state.currentMeasure[state.currentModalId] = { weight: val, skipped: false, done: true };
@@ -203,7 +203,7 @@ function completeMeasurement() {
   const entities = getMeasureEntities();
   const allDone = entities.every(e => state.currentMeasure[e.id]?.done);
   if (!allDone) {
-    showToast('全員の入力が終わってにゃい 🐾');
+    showToast('全員の入力が終わってません 🐾');
     return;
   }
 
@@ -214,7 +214,7 @@ function completeMeasurement() {
     const m = state.currentMeasure[e.id];
     if (!m.skipped) {
       let weight = m.weight;
-      // 抱っこ測定: ペットの体重 = 抱っこ重量 - 人の体重
+      // 抱っこで測定: ペットの体重 = 抱っこ重量 - 人の体重
       if (state.settings.method === 'hug' && e.id !== HUMAN_ID) {
         const humanEntry = state.currentMeasure[HUMAN_ID];
         if (humanEntry && !humanEntry.skipped && humanEntry.weight) {
@@ -234,7 +234,7 @@ function completeMeasurement() {
   state.records.sort((a, b) => a.date.localeCompare(b.date));
   saveData();
 
-  showToast('測定完了！おつかれさまにゃ 🐱');
+  showToast('測定完了！おつかれさまです 🐱');
   showScreen('home');
 }
 
@@ -261,7 +261,7 @@ function startVoice() {
 
   state.recognition.onstart = () => {
     document.getElementById('voice-btn').classList.add('listening');
-    document.getElementById('voice-status').textContent = '🎤 聞いてるにゃ...';
+    document.getElementById('voice-status').textContent = '🎤 聞いています...';
     document.getElementById('voice-status').classList.add('listening');
   };
 
@@ -273,14 +273,14 @@ function startVoice() {
       document.getElementById('voice-status').textContent = `✓ "${transcript}" → ${num}kg`;
       document.getElementById('voice-status').classList.remove('listening');
     } else {
-      document.getElementById('voice-status').textContent = `聞き取れなかったにゃ（${transcript}）`;
+      document.getElementById('voice-status').textContent = `聞き取れませんでした（${transcript}）`;
       document.getElementById('voice-status').classList.remove('listening');
     }
     stopVoice();
   };
 
   state.recognition.onerror = () => {
-    document.getElementById('voice-status').textContent = 'エラーが発生したにゃ';
+    document.getElementById('voice-status').textContent = 'エラーが発生しました';
     document.getElementById('voice-status').classList.remove('listening');
     stopVoice();
   };
@@ -330,7 +330,7 @@ function renderRecords() {
 
   if (entities.length === 0) {
     tabs.innerHTML = '';
-    document.getElementById('history-list').innerHTML = `<div class="empty-state"><div class="emoji">📊</div><p>ねこを登録して測定すると<br>記録が表示されるよ</p></div>`;
+    document.getElementById('history-list').innerHTML = `<div class="empty-state"><div class="emoji">📊</div><p>ペットを登録して測定すると<br>記録が表示されるよ</p></div>`;
     return;
   }
 
@@ -436,7 +436,7 @@ function renderChart(records) {
 function renderPetList() {
   const list = document.getElementById('pet-list');
   if (state.pets.length === 0) {
-    list.innerHTML = `<div class="empty-state"><div class="emoji">🐱</div><p>まだねこが登録されていないよ<br>上のボタンから登録してにゃ</p></div>`;
+    list.innerHTML = `<div class="empty-state"><div class="emoji">🐕</div><p>まだペットが登録されていないよ<br>上のボタンから登録してね</p></div>`;
     return;
   }
   list.innerHTML = state.pets.map(pet => `
@@ -455,7 +455,7 @@ function openPetModal(petId) {
   state.editingPetId = petId;
   const modal = document.getElementById('pet-modal');
   const isNew = !petId;
-  document.getElementById('pet-modal-title').textContent = isNew ? 'ねこを登録' : 'ねこを編集';
+  document.getElementById('pet-modal-title').textContent = isNew ? 'ペットを登録' : 'ペットを編集';
   document.getElementById('delete-pet-btn').style.display = isNew ? 'none' : 'block';
 
   if (isNew) {
@@ -508,7 +508,7 @@ function handlePhoto(event) {
 
 function savePet() {
   const name = document.getElementById('pet-name-input').value.trim();
-  if (!name) { showToast('名前を入力してにゃ 🐱'); return; }
+  if (!name) { showToast('名前を入力してください 🐱'); return; }
 
   const selectedAvatar = document.querySelector('.avatar-opt.selected')?.dataset.avatar || '🐱';
   const preview = document.getElementById('photo-preview');
@@ -527,17 +527,17 @@ function savePet() {
   closePetModal();
   renderPetList();
   renderHome();
-  showToast('保存したにゃ 🐾');
+  showToast('保存しました 🐾');
 }
 
 function deletePet() {
-  if (!confirm('このねこを削除してもよい？')) return;
+  if (!confirm('この子をリストから外す？')) return;
   state.pets = state.pets.filter(p => p.id !== state.editingPetId);
   saveData();
   closePetModal();
   renderPetList();
   renderHome();
-  showToast('削除したにゃ');
+  showToast('リストから外しました');
 }
 
 // ===== SETTINGS =====
@@ -576,14 +576,14 @@ async function toggleNotification(enabled) {
     if ('Notification' in window) {
       const perm = await Notification.requestPermission();
       if (perm !== 'granted') {
-        showToast('通知の許可が必要にゃ 🔔');
+        showToast('通知の許可が必要です 🔔');
         document.getElementById('toggle-notify').checked = false;
         return;
       }
     }
     state.settings.notifyEnabled = true;
     scheduleNotification();
-    showToast(`毎月${state.settings.notifyDay}日に通知するにゃ 🔔`);
+    showToast(`毎月${state.settings.notifyDay}日に通知します 🔔`);
   } else {
     state.settings.notifyEnabled = false;
   }
