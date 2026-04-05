@@ -6,9 +6,9 @@
 <meta name="theme-color" content="#f5ede0">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="ねこ体重">
+<meta name="apple-mobile-web-app-title" content="抱っこで測定">
 <link rel="manifest" href="manifest.json">
-<title>ねこ体重</title>
+<title>抱っこで測定</title>
 <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -137,7 +137,7 @@
     color: white;
   }
   .home-hero::after {
-    content: '🐱';
+    content: '';
     position: absolute;
     right: 20px; top: 30px;
     font-size: 64px;
@@ -768,15 +768,15 @@
 <!-- ===== HOME SCREEN ===== -->
 <div class="screen active" id="screen-home">
   <div class="home-hero">
-    <h1>ねこ体重</h1>
+    <h1>抱っこで測定</h1>
     <p id="home-date">今日も元気に測ろう 🐾</p>
   </div>
 
-  <button class="measure-btn" onclick="startMeasurement()">🐱 測定をはじめる</button>
+  <button class="measure-btn" onclick="startMeasurement()">🐕 測定をはじめる</button>
 
   <div class="summary-grid">
     <div class="summary-card">
-      <div class="label">登録中のねこ</div>
+      <div class="label">登録中のペット</div>
       <div class="value" id="home-pet-count">0</div>
       <div class="sub">匹</div>
     </div>
@@ -787,10 +787,10 @@
     </div>
   </div>
 
-  <div class="section-title">ねこたち</div>
+  <div class="section-title">ペットたち</div>
   <div class="pet-scroll" id="home-pet-scroll">
     <div class="empty-state" style="padding:20px 16px;text-align:left;">
-      <p style="font-size:13px">ねこを登録してにゃ 🐾</p>
+      <p style="font-size:13px">ペットを登録🐾</p>
     </div>
   </div>
 </div>
@@ -832,13 +832,13 @@
 <!-- ===== PETS SCREEN ===== -->
 <div class="screen" id="screen-pets">
   <div class="page-header">
-    <h1>🐱 ねこ管理</h1>
-    <p>ねこの登録・編集ができるよ</p>
+    <h1>🐕ペット管理</h1>
+    <p>ペットの登録・編集ができるよ</p>
   </div>
 
   <button class="add-pet-btn" onclick="openPetModal(null)">
     <span style="font-size:24px">＋</span>
-    <span>あたらしいねこを登録</span>
+    <span>あたらしいペットを登録</span>
   </button>
 
   <div id="pet-list"></div>
@@ -862,7 +862,7 @@
         </div>
         <div class="radio-option" id="method-hug" onclick="setMethod('hug')">
           <div class="radio-emoji">🤗</div>
-          <div class="radio-text">抱っこ測定</div>
+          <div class="radio-text">抱っこで測定</div>
           <div class="radio-sub">抱っこして差し引き</div>
         </div>
       </div>
@@ -927,7 +927,7 @@
   </div>
 
   <div style="padding:16px;text-align:center;color:var(--muted);font-size:12px;">
-    ねこ体重 v1.0 🐾
+    抱っこで測定 v1.0 🐾
   </div>
 </div>
 
@@ -940,7 +940,7 @@
     <span class="icon">📊</span>記録
   </button>
   <button class="nav-btn" onclick="showScreen('pets')" id="nav-pets">
-    <span class="icon">🐱</span>ねこ
+    <span class="icon">🐕</span>ペット
   </button>
   <button class="nav-btn" onclick="showScreen('settings')" id="nav-settings">
     <span class="icon">⚙️</span>設定
@@ -967,10 +967,10 @@
 <div class="pet-modal" id="pet-modal">
   <div class="pet-modal-inner">
     <div class="modal-handle"></div>
-    <div class="modal-title" id="pet-modal-title">ねこを登録</div>
+    <div class="modal-title" id="pet-modal-title">ペットを登録</div>
 
     <label class="form-label">名前</label>
-    <input class="form-input" id="pet-name-input" type="text" placeholder="ねこの名前">
+    <input class="form-input" id="pet-name-input" type="text" placeholder="ペットの名前">
 
     <label class="form-label">アバター</label>
     <div class="avatar-picker" id="avatar-picker">
@@ -991,7 +991,7 @@
     </div>
 
     <button class="save-btn" onclick="savePet()">保存する</button>
-    <button class="delete-btn" id="delete-pet-btn" onclick="deletePet()" style="display:none">このねこを削除する</button>
+    <button class="delete-btn" id="delete-pet-btn" onclick="deletePet()" style="display:none">リストから外す</button>
     <button class="skip-btn" onclick="closePetModal()" style="margin-top:8px">キャンセル</button>
   </div>
 </div>
