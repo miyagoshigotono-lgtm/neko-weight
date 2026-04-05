@@ -2,7 +2,7 @@
   "name": "ねこ体重",
   "short_name": "ねこ体重",
   "description": "猫の体重記録アプリ",
-  "start_url": "/",
+  "start_url": "/neko-weight/",
   "display": "standalone",
   "background_color": "#faf5ee",
   "theme_color": "#f5ede0",
