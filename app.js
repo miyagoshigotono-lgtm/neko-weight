@@ -1,28 +1,34 @@
+// ===== CONSTANTS =====
+const HUMAN_ID = '__human__';
+const SAMPLE_PET_ID = '__dakkokun__';
+
 // ===== STATE =====
 let state = {
-  pets: [],        // { id, name, avatar, photo }
+  pets: [],
   settings: {
-    method: 'direct',    // 'direct' | 'hug'
+    method: 'direct',
     recordHuman: false,
     useVoice: false,
     notifyEnabled: false,
-    notifyDay: 1
+    notifyInterval: 'monthly', // 'daily' | 'weekly' | 'monthly'
+    notifyDay: 1,              // 月次:1-28、週次:1-7(1=日)
   },
-  records: [],     // { date, entries: [{id, weight, skipped}] }
-  currentMeasure: {},   // { id -> { weight, skipped, done } }
+  records: [],
+  currentMeasure: {},
   editingPetId: null,
-  selectedPetId: null,  // for records tab
-  currentModalId: null, // which entity is being measured
+  selectedPetId: null,
+  currentModalId: null,
   chart: null,
   recognition: null,
 };
 
-const EMOJIS = ['🐱','🐈','🐈‍⬛','😺','😸','🦁'];
-const HUMAN_ID = '__human__';
-
 // ===== INIT =====
 function init() {
   loadData();
+  if (!localStorage.getItem('neko_initialized')) {
+    insertSampleData();
+    localStorage.setItem('neko_initialized', '1');
+  }
   updateHomeDate();
   renderHome();
   renderPetList();
@@ -49,13 +55,50 @@ function saveData() {
   localStorage.setItem('neko_records', JSON.stringify(state.records));
 }
 
+// ===== SAMPLE DATA =====
+function insertSampleData() {
+  // だっこくん登録
+  state.pets.push({ id: SAMPLE_PET_ID, name: 'だっこくん', avatar: '🐱', photo: null });
+
+  // 人の体重も有効にする
+  state.settings.recordHuman = true;
+
+  // 12ヶ月分のサンプル記録を生成
+  const today = new Date();
+  const humanBase = 60.0;
+
+  // だっこくんの体重推移（子猫→1歳）
+  const dakkoCurve = [0.35, 0.55, 0.80, 1.10, 1.45, 1.85, 2.25, 2.60, 2.90, 3.15, 3.35, 3.50];
+
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(today.getFullYear(), today.getMonth() - i, 15);
+    const dateStr = d.toISOString().slice(0, 10);
+
+    // 人の体重: 60kg±2kgでランダム推移
+    const humanWeight = Math.round((humanBase + (Math.random() * 4 - 2)) * 10) / 10;
+
+    // だっこくんの体重
+    const dakkoWeight = dakkoCurve[11 - i] + Math.round((Math.random() * 0.06 - 0.03) * 100) / 100;
+
+    state.records.push({
+      date: dateStr,
+      entries: [
+        { id: HUMAN_ID, weight: humanWeight, skipped: false },
+        { id: SAMPLE_PET_ID, weight: Math.round(dakkoWeight * 100) / 100, skipped: false },
+      ]
+    });
+  }
+
+  state.records.sort((a, b) => a.date.localeCompare(b.date));
+  saveData();
+}
+
 // ===== NAVIGATION =====
 function showScreen(name) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('screen-' + name).classList.add('active');
   document.getElementById('nav-' + name)?.classList.add('active');
-
   if (name === 'home') renderHome();
   if (name === 'records') renderRecords();
   if (name === 'pets') renderPetList();
@@ -71,8 +114,6 @@ function updateHomeDate() {
 
 function renderHome() {
   document.getElementById('home-pet-count').textContent = state.pets.length;
-
-  // Last measure date
   const lastRec = state.records[state.records.length - 1];
   if (lastRec) {
     document.getElementById('home-last-date').textContent = formatDate(lastRec.date);
@@ -82,10 +123,9 @@ function renderHome() {
     document.getElementById('home-last-sub').textContent = 'まだ測定なし';
   }
 
-  // Pet scroll
   const scroll = document.getElementById('home-pet-scroll');
   if (state.pets.length === 0) {
-    scroll.innerHTML = `<div style="padding:12px 0;color:var(--muted);font-size:13px;white-space:nowrap;padding-left:4px;">ねこを登録してください 🐾</div>`;
+    scroll.innerHTML = `<div style="padding:12px 0;color:var(--muted);font-size:13px;padding-left:4px;">ペットを登録してね 🐾</div>`;
     return;
   }
   scroll.innerHTML = state.pets.map(pet => {
@@ -94,10 +134,11 @@ function renderHome() {
     const diff = (last !== null && prev !== null) ? (last - prev) : null;
     const diffStr = diff === null ? '' : (diff > 0 ? `+${diff.toFixed(2)}kg` : diff < 0 ? `${diff.toFixed(2)}kg` : `±0`);
     const diffClass = diff === null ? '' : diff > 0 ? 'diff-up' : diff < 0 ? 'diff-down' : 'diff-same';
+    const isSample = pet.id === SAMPLE_PET_ID;
     return `
       <div class="pet-mini-card" onclick="showScreen('records');selectPetTab('${pet.id}')">
         <div class="pet-mini-avatar">${avatarHtml(pet, 56)}</div>
-        <div class="pet-mini-name">${escHtml(pet.name)}</div>
+        <div class="pet-mini-name">${escHtml(pet.name)}${isSample ? '<span class="sample-badge">サンプル</span>' : ''}</div>
         <div class="pet-mini-weight">${last !== null ? last.toFixed(2)+'kg' : '未測定'}</div>
         ${diffStr ? `<div class="pet-mini-diff ${diffClass}">${diffStr}</div>` : ''}
       </div>`;
@@ -108,33 +149,10 @@ function renderHome() {
 function startMeasurement() {
   state.currentMeasure = {};
   showScreen('measure');
-
-  const label = state.settings.method === 'hug' ? '抱っこ測定' : '直接測定';
-  document.getElementById('meas-method-label').textContent = label;
-
+  document.getElementById('meas-method-label').textContent =
+    state.settings.method === 'hug' ? '抱っこ測定' : '直接測定';
   renderMeasCards();
   updateCompleteBtn();
-}
-
-function renderMeasCards() {
-  const grid = document.getElementById('meas-cards');
-  const entities = getMeasureEntities();
-
-  grid.innerHTML = entities.map(e => {
-    const m = state.currentMeasure[e.id];
-    const done = m?.done;
-    const skipped = m?.skipped;
-    const last = e.id === HUMAN_ID ? getLastHumanWeight() : getLastWeight(e.id);
-    return `
-      <div class="meas-card ${done && !skipped ? 'done' : ''} ${skipped ? 'skipped' : ''}" 
-           id="mcard-${e.id}" onclick="openInputModal('${e.id}')">
-        <div class="meas-avatar">${avatarHtml(e, 64)}</div>
-        <div class="meas-card-name">${escHtml(e.name)}</div>
-        <div class="meas-card-last">${last !== null ? '前回 '+last.toFixed(2)+'kg' : '初回測定'}</div>
-        ${done && !skipped ? `<div style="font-size:11px;color:var(--green);margin-top:4px;font-weight:700;">${state.currentMeasure[e.id].weight.toFixed(2)}kg</div>` : ''}
-        ${skipped ? `<div style="font-size:11px;color:var(--muted);margin-top:4px;">未測定</div>` : ''}
-      </div>`;
-  }).join('');
 }
 
 function getMeasureEntities() {
@@ -146,6 +164,30 @@ function getMeasureEntities() {
   return entities;
 }
 
+function renderMeasCards() {
+  const grid = document.getElementById('meas-cards');
+  const entities = getMeasureEntities();
+  if (entities.length === 0) {
+    grid.innerHTML = `<div class="empty-state" style="grid-column:span 2"><div class="emoji">🐾</div><p>ペットを登録してから<br>測定してね</p></div>`;
+    return;
+  }
+  grid.innerHTML = entities.map(e => {
+    const m = state.currentMeasure[e.id];
+    const done = m?.done;
+    const skipped = m?.skipped;
+    const last = e.id === HUMAN_ID ? getLastHumanWeight() : getLastWeight(e.id);
+    return `
+      <div class="meas-card ${done && !skipped ? 'done' : ''} ${skipped ? 'skipped' : ''}"
+           onclick="openInputModal('${e.id}')">
+        <div class="meas-avatar">${avatarHtml(e, 64)}</div>
+        <div class="meas-card-name">${escHtml(e.name)}</div>
+        <div class="meas-card-last">${last !== null ? '前回 '+last.toFixed(2)+'kg' : '初回測定'}</div>
+        ${done && !skipped ? `<div style="font-size:11px;color:var(--green);margin-top:4px;font-weight:700;">${state.currentMeasure[e.id].weight.toFixed(2)}kg</div>` : ''}
+        ${skipped ? `<div style="font-size:11px;color:var(--muted);margin-top:4px;">未測定</div>` : ''}
+      </div>`;
+  }).join('');
+}
+
 function openInputModal(entityId) {
   state.currentModalId = entityId;
   const e = entityId === HUMAN_ID
@@ -154,11 +196,9 @@ function openInputModal(entityId) {
   if (!e) return;
 
   document.getElementById('modal-title').textContent = `${e.name}の体重`;
-  document.getElementById('weight-input').value = '';
-  document.getElementById('voice-status').textContent = '';
-
   const existing = state.currentMeasure[entityId];
-  if (existing?.weight) document.getElementById('weight-input').value = existing.weight;
+  document.getElementById('weight-input').value = existing?.weight || '';
+  document.getElementById('voice-status').textContent = '';
 
   const voiceBtn = document.getElementById('voice-btn');
   voiceBtn.style.display = state.settings.useVoice ? 'flex' : 'none';
@@ -175,10 +215,7 @@ function closeInputModal() {
 
 function confirmMeasure() {
   const val = parseFloat(document.getElementById('weight-input').value);
-  if (isNaN(val) || val <= 0) {
-    showToast('体重を入力してください 🐕');
-    return;
-  }
+  if (isNaN(val) || val <= 0) { showToast('体重を入力してね 🐾'); return; }
   state.currentMeasure[state.currentModalId] = { weight: val, skipped: false, done: true };
   closeInputModal();
   renderMeasCards();
@@ -195,100 +232,76 @@ function skipMeasure() {
 function updateCompleteBtn() {
   const entities = getMeasureEntities();
   const allDone = entities.length > 0 && entities.every(e => state.currentMeasure[e.id]?.done);
-  const btn = document.getElementById('complete-btn');
-  btn.classList.toggle('ready', allDone);
+  document.getElementById('complete-btn').classList.toggle('ready', allDone);
 }
 
 function completeMeasurement() {
   const entities = getMeasureEntities();
-  const allDone = entities.every(e => state.currentMeasure[e.id]?.done);
-  if (!allDone) {
-    showToast('全員の入力が終わってません 🐾');
-    return;
+  if (!entities.every(e => state.currentMeasure[e.id]?.done)) {
+    showToast('全員の入力が終わっていないよ 🐾'); return;
   }
 
   const today = todayStr();
-  const entries = [];
-
-  entities.forEach(e => {
+  const entries = entities.map(e => {
     const m = state.currentMeasure[e.id];
-    if (!m.skipped) {
-      let weight = m.weight;
-      // 抱っこで測定: ペットの体重 = 抱っこ重量 - 人の体重
-      if (state.settings.method === 'hug' && e.id !== HUMAN_ID) {
-        const humanEntry = state.currentMeasure[HUMAN_ID];
-        if (humanEntry && !humanEntry.skipped && humanEntry.weight) {
-          weight = m.weight - humanEntry.weight;
-          if (weight < 0) weight = 0;
-        }
-      }
-      entries.push({ id: e.id, weight: Math.round(weight * 100) / 100, skipped: false });
-    } else {
-      entries.push({ id: e.id, weight: null, skipped: true });
+    if (m.skipped) return { id: e.id, weight: null, skipped: true };
+    let weight = m.weight;
+    if (state.settings.method === 'hug' && e.id !== HUMAN_ID) {
+      const hw = state.currentMeasure[HUMAN_ID];
+      if (hw && !hw.skipped) weight = Math.max(0, m.weight - hw.weight);
     }
+    return { id: e.id, weight: Math.round(weight * 100) / 100, skipped: false };
   });
 
-  // Remove same-day record if exists
   state.records = state.records.filter(r => r.date !== today);
   state.records.push({ date: today, entries });
   state.records.sort((a, b) => a.date.localeCompare(b.date));
   saveData();
-
-  showToast('測定完了！おつかれさまです 🐱');
+  showToast('測定完了！お疲れさまでした 🐾');
   showScreen('home');
 }
 
-// ===== VOICE INPUT =====
+// ===== VOICE =====
 function toggleVoice() {
   const btn = document.getElementById('voice-btn');
-  if (btn.classList.contains('listening')) {
-    stopVoice();
-  } else {
-    startVoice();
-  }
+  btn.classList.contains('listening') ? stopVoice() : startVoice();
 }
 
 function startVoice() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    showToast('このブラウザは音声入力非対応です');
-    return;
-  }
-  state.recognition = new SpeechRecognition();
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { showToast('このブラウザは音声入力非対応です'); return; }
+  state.recognition = new SR();
   state.recognition.lang = 'ja-JP';
   state.recognition.continuous = false;
   state.recognition.interimResults = false;
 
   state.recognition.onstart = () => {
     document.getElementById('voice-btn').classList.add('listening');
-    document.getElementById('voice-status').textContent = '🎤 聞いています...';
-    document.getElementById('voice-status').classList.add('listening');
+    const vs = document.getElementById('voice-status');
+    vs.textContent = '🎤 聞いています...';
+    vs.classList.add('listening');
   };
-
   state.recognition.onresult = (event) => {
     const transcript = event.results[0][0].transcript;
     const num = parseVoiceNumber(transcript);
+    const vs = document.getElementById('voice-status');
+    vs.classList.remove('listening');
     if (num !== null) {
       document.getElementById('weight-input').value = num;
-      document.getElementById('voice-status').textContent = `✓ "${transcript}" → ${num}kg`;
-      document.getElementById('voice-status').classList.remove('listening');
+      vs.textContent = `✓ 「${transcript}」→ ${num}kg`;
     } else {
-      document.getElementById('voice-status').textContent = `聞き取れませんでした（${transcript}）`;
-      document.getElementById('voice-status').classList.remove('listening');
+      vs.textContent = `聞き取れませんでした（${transcript}）`;
     }
     stopVoice();
   };
-
   state.recognition.onerror = () => {
     document.getElementById('voice-status').textContent = 'エラーが発生しました';
     document.getElementById('voice-status').classList.remove('listening');
     stopVoice();
   };
-
   state.recognition.onend = () => {
-    document.getElementById('voice-btn').classList.remove('listening');
+    document.getElementById('voice-btn')?.classList.remove('listening');
   };
-
   state.recognition.start();
 }
 
@@ -301,23 +314,13 @@ function stopVoice() {
 }
 
 function parseVoiceNumber(text) {
-  // 「4.2キロ」「420グラム」「4キロ200グラム」「4.2」など
-  text = text.replace(/\s/g, '');
-  // グラム -> kg
-  let m = text.match(/^(\d+\.?\d*)グラム?$/);
-  if (m) return Math.round(parseFloat(m[1])) / 1000;
-  // ◯キロ◯◯グラム
-  m = text.match(/^(\d+)キロ?(\d+)グラム?$/);
-  if (m) return parseFloat(m[1]) + parseInt(m[2]) / 1000;
-  // ◯キロ◯◯
-  m = text.match(/^(\d+)キロ?(\d+)$/);
-  if (m) return parseFloat(`${m[1]}.${m[2]}`);
-  // ◯.◯キロ
-  m = text.match(/^(\d+\.?\d*)キロ?$/);
-  if (m) return parseFloat(m[1]);
-  // 数字だけ
-  m = text.match(/^(\d+\.?\d*)$/);
-  if (m) return parseFloat(m[1]);
+  text = text.replace(/\s/g, '').replace(/キロメートル|ｋｍ|km/gi, 'キロ').replace(/てん/g, '.');
+  let m;
+  m = text.match(/^(\d+\.?\d*)グラム?$/); if (m) return Math.round(parseFloat(m[1])) / 1000;
+  m = text.match(/^(\d+)キロ?(\d+)グラム?$/); if (m) return parseFloat(m[1]) + parseInt(m[2]) / 1000;
+  m = text.match(/^(\d+)キロ?(\d+)$/); if (m) return parseFloat(`${m[1]}.${m[2]}`);
+  m = text.match(/^(\d+\.?\d*)キロ?$/); if (m) return parseFloat(m[1]);
+  m = text.match(/^(\d+\.?\d*)$/); if (m) return parseFloat(m[1]);
   return null;
 }
 
@@ -333,16 +336,13 @@ function renderRecords() {
     document.getElementById('history-list').innerHTML = `<div class="empty-state"><div class="emoji">📊</div><p>ペットを登録して測定すると<br>記録が表示されるよ</p></div>`;
     return;
   }
-
   if (!state.selectedPetId || !entities.find(e => e.id === state.selectedPetId)) {
     state.selectedPetId = entities[0].id;
   }
-
   tabs.innerHTML = entities.map(e => `
     <button class="pet-tab ${e.id === state.selectedPetId ? 'active' : ''}"
             onclick="selectPetTab('${e.id}')">${escHtml(e.name)}</button>
   `).join('');
-
   renderPetHistory(state.selectedPetId);
 }
 
@@ -354,11 +354,10 @@ function selectPetTab(id) {
 function renderPetHistory(entityId) {
   const records = state.records
     .map(r => {
-      const entry = r.entries.find(e => e.id === entityId);
-      return entry ? { date: r.date, weight: entry.weight, skipped: entry.skipped } : null;
+      const entry = r.entries?.find(e => e.id === entityId);
+      return entry && !entry.skipped && entry.weight !== null ? { date: r.date, weight: entry.weight } : null;
     })
-    .filter(Boolean)
-    .filter(r => !r.skipped && r.weight !== null);
+    .filter(Boolean);
 
   renderChart(records);
 
@@ -367,7 +366,6 @@ function renderPetHistory(entityId) {
     list.innerHTML = `<div class="empty-state"><div class="emoji">📝</div><p>まだ記録がないよ<br>測定してみよう！</p></div>`;
     return;
   }
-
   const reversed = [...records].reverse();
   list.innerHTML = reversed.map((r, i) => {
     const prev = reversed[i + 1];
@@ -376,7 +374,7 @@ function renderPetHistory(entityId) {
     const diffClass = diff === null ? 'diff-same' : diff > 0 ? 'diff-up' : diff < 0 ? 'diff-down' : 'diff-same';
     return `
       <div class="history-item">
-        <div class="history-date">${formatDate(r.date)}</div>
+        <div class="history-date">${formatDateLong(r.date)}</div>
         <div class="history-weight">${r.weight.toFixed(2)} <span style="font-size:13px;color:var(--muted)">kg</span></div>
         <div class="history-diff ${diffClass}">${diffStr}</div>
       </div>`;
@@ -386,23 +384,14 @@ function renderPetHistory(entityId) {
 function renderChart(records) {
   const canvas = document.getElementById('weightChart');
   if (state.chart) { state.chart.destroy(); state.chart = null; }
-
-  if (records.length < 2) {
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    canvas.parentElement.querySelector('.graph-title').nextSibling?.remove?.();
-    return;
-  }
-
-  const labels = records.map(r => formatDate(r.date));
-  const data = records.map(r => r.weight);
+  if (records.length < 2) return;
 
   state.chart = new Chart(canvas, {
     type: 'line',
     data: {
-      labels,
+      labels: records.map(r => formatDate(r.date)),
       datasets: [{
-        data,
+        data: records.map(r => r.weight),
         borderColor: '#d4845a',
         backgroundColor: 'rgba(212,132,90,0.1)',
         borderWidth: 2.5,
@@ -416,15 +405,9 @@ function renderChart(records) {
       responsive: true,
       plugins: { legend: { display: false } },
       scales: {
-        x: {
-          ticks: { font: { size: 10 }, color: '#8a6f5e' },
-          grid: { display: false }
-        },
+        x: { ticks: { font: { size: 10 }, color: '#8a6f5e' }, grid: { display: false } },
         y: {
-          ticks: {
-            font: { size: 10 }, color: '#8a6f5e',
-            callback: v => v.toFixed(1) + 'kg'
-          },
+          ticks: { font: { size: 10 }, color: '#8a6f5e', callback: v => v.toFixed(1)+'kg' },
           grid: { color: 'rgba(0,0,0,0.05)' }
         }
       }
@@ -436,48 +419,52 @@ function renderChart(records) {
 function renderPetList() {
   const list = document.getElementById('pet-list');
   if (state.pets.length === 0) {
-    list.innerHTML = `<div class="empty-state"><div class="emoji">🐕</div><p>まだペットが登録されていないよ<br>上のボタンから登録してね</p></div>`;
+    list.innerHTML = `<div class="empty-state"><div class="emoji">🐾</div><p>まだペットが登録されていないよ<br>上のボタンから登録してね</p></div>`;
     return;
   }
-  list.innerHTML = state.pets.map(pet => `
-    <div class="pet-list-item" onclick="openPetModal('${pet.id}')">
-      <div class="pet-list-avatar">${avatarHtml(pet, 52)}</div>
-      <div class="pet-list-info">
-        <div class="pet-list-name">${escHtml(pet.name)}</div>
-        <div class="pet-list-sub">最終: ${getLastWeight(pet.id) !== null ? getLastWeight(pet.id).toFixed(2)+'kg' : '未測定'}</div>
-      </div>
-      <span class="pet-list-arrow">›</span>
-    </div>
-  `).join('');
+  list.innerHTML = state.pets.map(pet => {
+    const isSample = pet.id === SAMPLE_PET_ID;
+    return `
+      <div class="pet-list-item" onclick="openPetModal('${pet.id}')">
+        <div class="pet-list-avatar">${avatarHtml(pet, 52)}</div>
+        <div class="pet-list-info">
+          <div class="pet-list-name">${escHtml(pet.name)}${isSample ? '<span class="sample-badge">サンプル</span>' : ''}</div>
+          <div class="pet-list-sub">最終: ${getLastWeight(pet.id) !== null ? getLastWeight(pet.id).toFixed(2)+'kg' : '未測定'}</div>
+        </div>
+        <span class="pet-list-arrow">›</span>
+      </div>`;
+  }).join('');
 }
 
 function openPetModal(petId) {
   state.editingPetId = petId;
-  const modal = document.getElementById('pet-modal');
   const isNew = !petId;
   document.getElementById('pet-modal-title').textContent = isNew ? 'ペットを登録' : 'ペットを編集';
   document.getElementById('delete-pet-btn').style.display = isNew ? 'none' : 'block';
 
+  const preview = document.getElementById('photo-preview');
+  preview._photoData = null;
+
   if (isNew) {
     document.getElementById('pet-name-input').value = '';
     document.querySelectorAll('.avatar-opt').forEach((o, i) => o.classList.toggle('selected', i === 0));
-    document.getElementById('photo-preview').innerHTML = '🐱';
-    document.getElementById('photo-preview').style.backgroundImage = '';
+    preview.style.backgroundImage = '';
+    preview.style.backgroundSize = '';
+    preview.textContent = '🐶';
   } else {
     const pet = state.pets.find(p => p.id === petId);
     document.getElementById('pet-name-input').value = pet.name;
     document.querySelectorAll('.avatar-opt').forEach(o => o.classList.toggle('selected', o.dataset.avatar === pet.avatar));
-    const preview = document.getElementById('photo-preview');
     if (pet.photo) {
       preview.style.backgroundImage = `url(${pet.photo})`;
       preview.style.backgroundSize = 'cover';
       preview.textContent = '';
     } else {
       preview.style.backgroundImage = '';
-      preview.textContent = pet.avatar || '🐱';
+      preview.textContent = pet.avatar || '🐶';
     }
   }
-  modal.classList.add('open');
+  document.getElementById('pet-modal').classList.add('open');
 }
 
 function closePetModal() {
@@ -490,6 +477,7 @@ function selectAvatar(el) {
   const preview = document.getElementById('photo-preview');
   preview.textContent = el.dataset.avatar;
   preview.style.backgroundImage = '';
+  preview._photoData = null;
 }
 
 function handlePhoto(event) {
@@ -508,9 +496,8 @@ function handlePhoto(event) {
 
 function savePet() {
   const name = document.getElementById('pet-name-input').value.trim();
-  if (!name) { showToast('名前を入力してください 🐱'); return; }
-
-  const selectedAvatar = document.querySelector('.avatar-opt.selected')?.dataset.avatar || '🐱';
+  if (!name) { showToast('名前を入力してね 🐾'); return; }
+  const selectedAvatar = document.querySelector('.avatar-opt.selected')?.dataset.avatar || '🐶';
   const preview = document.getElementById('photo-preview');
   const photo = preview._photoData || null;
 
@@ -522,7 +509,6 @@ function savePet() {
   } else {
     state.pets.push({ id: genId(), name, avatar: selectedAvatar, photo });
   }
-
   saveData();
   closePetModal();
   renderPetList();
@@ -531,7 +517,14 @@ function savePet() {
 }
 
 function deletePet() {
-  if (!confirm('この子をリストから外す？')) return;
+  const pet = state.pets.find(p => p.id === state.editingPetId);
+  const name = pet ? pet.name : 'このペット';
+  if (!confirm(`「${name}」をリストから外しますか？\n測定記録もすべて削除されます。`)) return;
+  // 記録からも削除
+  state.records = state.records.map(r => ({
+    ...r,
+    entries: r.entries.filter(e => e.id !== state.editingPetId)
+  })).filter(r => r.entries.length > 0);
   state.pets = state.pets.filter(p => p.id !== state.editingPetId);
   saveData();
   closePetModal();
@@ -545,8 +538,9 @@ function applySettings() {
   document.getElementById('toggle-human').checked = state.settings.recordHuman;
   document.getElementById('toggle-voice').checked = state.settings.useVoice;
   document.getElementById('toggle-notify').checked = state.settings.notifyEnabled;
-  document.getElementById('notify-day-display').textContent = state.settings.notifyDay;
   setMethod(state.settings.method, true);
+  setNotifyInterval(state.settings.notifyInterval || 'monthly', true);
+  updateNotifyDayUI();
 }
 
 function setMethod(method, silent) {
@@ -561,12 +555,55 @@ function saveSetting(key, value) {
   saveData();
 }
 
+function setNotifyInterval(interval, silent) {
+  state.settings.notifyInterval = interval;
+  ['daily','weekly','monthly'].forEach(i => {
+    document.getElementById('interval-' + i)?.classList.toggle('selected', i === interval);
+  });
+  // 通知日UIの更新
+  updateNotifyDayUI();
+  if (!silent) saveData();
+}
+
+function updateNotifyDayUI() {
+  const interval = state.settings.notifyInterval;
+  const row = document.getElementById('notify-day-row');
+  const label = document.getElementById('notify-day-label');
+  const desc = document.getElementById('notify-day-desc');
+  const unit = document.getElementById('notify-day-unit');
+  const display = document.getElementById('notify-day-display');
+
+  if (interval === 'daily') {
+    row.style.display = 'none';
+  } else if (interval === 'weekly') {
+    row.style.display = 'flex';
+    label.textContent = '通知する曜日';
+    desc.textContent = '1=日 2=月 3=火 4=水 5=木 6=金 7=土';
+    unit.textContent = '';
+    const day = Math.min(Math.max(state.settings.notifyDay, 1), 7);
+    const dayNames = ['','日','月','火','水','木','金','土'];
+    display.textContent = dayNames[day] + '曜日';
+  } else {
+    row.style.display = 'flex';
+    label.textContent = '通知する日';
+    desc.textContent = '毎月この日に通知';
+    unit.textContent = '日';
+    display.textContent = state.settings.notifyDay;
+  }
+}
+
 function changeNotifyDay(delta) {
+  const interval = state.settings.notifyInterval;
   let day = state.settings.notifyDay + delta;
-  if (day < 1) day = 1;
-  if (day > 28) day = 28;
+  if (interval === 'weekly') {
+    if (day < 1) day = 7;
+    if (day > 7) day = 1;
+  } else {
+    if (day < 1) day = 1;
+    if (day > 28) day = 28;
+  }
   state.settings.notifyDay = day;
-  document.getElementById('notify-day-display').textContent = day;
+  updateNotifyDayUI();
   saveData();
   if (state.settings.notifyEnabled) scheduleNotification();
 }
@@ -583,7 +620,7 @@ async function toggleNotification(enabled) {
     }
     state.settings.notifyEnabled = true;
     scheduleNotification();
-    showToast(`毎月${state.settings.notifyDay}日に通知します 🔔`);
+    showToast('通知を設定しました 🔔');
   } else {
     state.settings.notifyEnabled = false;
   }
@@ -591,19 +628,43 @@ async function toggleNotification(enabled) {
 }
 
 function scheduleNotification() {
-  // Service Worker経由で通知をスケジュール
   if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
     navigator.serviceWorker.controller.postMessage({
       type: 'SCHEDULE_NOTIFY',
-      day: state.settings.notifyDay
+      interval: state.settings.notifyInterval,
+      day: state.settings.notifyDay,
     });
   }
+}
+
+// ===== DATA RESET =====
+function resetHumanData() {
+  const recordCount = state.records.filter(r => r.entries?.some(e => e.id === HUMAN_ID && !e.skipped)).length;
+  if (recordCount === 0) {
+    showToast('削除するデータがありません');
+    return;
+  }
+  const confirmed = confirm(
+    `【わたしのデータをリセット】\n\n` +
+    `削除される内容：\n` +
+    `・人の体重記録 ${recordCount}件\n\n` +
+    `この操作は元に戻せません。\n本当に削除しますか？`
+  );
+  if (!confirmed) return;
+
+  state.records = state.records.map(r => ({
+    ...r,
+    entries: r.entries.filter(e => e.id !== HUMAN_ID)
+  })).filter(r => r.entries.length > 0);
+  saveData();
+  showToast('わたしのデータを削除しました');
+  renderHome();
 }
 
 // ===== HELPERS =====
 function getLastWeight(petId) {
   for (let i = state.records.length - 1; i >= 0; i--) {
-    const entry = state.records[i].entries.find(e => e.id === petId && !e.skipped);
+    const entry = state.records[i].entries?.find(e => e.id === petId && !e.skipped);
     if (entry) return entry.weight;
   }
   return null;
@@ -612,18 +673,15 @@ function getLastWeight(petId) {
 function getPrevWeight(petId) {
   let count = 0;
   for (let i = state.records.length - 1; i >= 0; i--) {
-    const entry = state.records[i].entries.find(e => e.id === petId && !e.skipped);
-    if (entry) {
-      count++;
-      if (count === 2) return entry.weight;
-    }
+    const entry = state.records[i].entries?.find(e => e.id === petId && !e.skipped);
+    if (entry) { count++; if (count === 2) return entry.weight; }
   }
   return null;
 }
 
 function getLastHumanWeight() {
   for (let i = state.records.length - 1; i >= 0; i--) {
-    const entry = state.records[i].entries.find(e => e.id === HUMAN_ID && !e.skipped);
+    const entry = state.records[i].entries?.find(e => e.id === HUMAN_ID && !e.skipped);
     if (entry) return entry.weight;
   }
   return null;
@@ -633,12 +691,17 @@ function avatarHtml(entity, size) {
   if (entity.photo) {
     return `<img src="${entity.photo}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;">`;
   }
-  return `<span style="font-size:${Math.floor(size*0.5)}px;line-height:${size}px;">${entity.avatar || '🐱'}</span>`;
+  return `<span style="font-size:${Math.floor(size*0.5)}px;line-height:${size}px;">${entity.avatar || '🐾'}</span>`;
 }
 
 function formatDate(str) {
   const d = new Date(str);
   return `${d.getMonth()+1}/${d.getDate()}`;
+}
+
+function formatDateLong(str) {
+  const d = new Date(str);
+  return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`;
 }
 
 function daysAgo(str) {
@@ -657,7 +720,7 @@ function genId() {
 }
 
 function escHtml(str) {
-  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function showToast(msg) {
@@ -667,7 +730,6 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove('show'), 2500);
 }
 
-// Close modals on overlay click
 document.getElementById('input-modal').addEventListener('click', function(e) {
   if (e.target === this) closeInputModal();
 });
