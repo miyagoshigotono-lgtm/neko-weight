@@ -31,6 +31,17 @@ const uint8_t  FEED_COUNT      = 9;
 const uint32_t FIRST_DELAY_MIN = 60;
 const uint32_t INTERVAL_MIN    = 105;
 
+// ベンチテスト用。1にすると「分」を「秒」として扱うので、
+// 15時間のスケジュールが15分で一巡する。
+// 実運用の書き込み時は必ず 0 に戻すこと。
+#define TEST_MODE 0
+
+#if TEST_MODE
+const uint32_t MINUTE_MS = 1000UL;
+#else
+const uint32_t MINUTE_MS = 60000UL;
+#endif
+
 // ---- 動作パラメータ --------------------------------------------------------
 // DEADBAND_MS: 回転開始からリードスイッチを無視する時間。
 //   停止時の惰性で磁石を僅かに行き過ぎるため、これが無いと
@@ -99,7 +110,7 @@ bool rotateOnce() {
 // i 回目（0始まり）の給餌が起点から何ミリ秒後かを返す。
 // 最大でも 900分 = 54,000,000ms なので uint32_t に収まる。
 uint32_t scheduledAt(uint8_t i) {
-  return (FIRST_DELAY_MIN + (uint32_t)i * INTERVAL_MIN) * 60000UL;
+  return (FIRST_DELAY_MIN + (uint32_t)i * INTERVAL_MIN) * MINUTE_MS;
 }
 
 void startDay() {
