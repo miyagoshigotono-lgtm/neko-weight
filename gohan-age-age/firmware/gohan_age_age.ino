@@ -4,8 +4,12 @@
 //
 // 動作の概要:
 //   電源投入 → 待機状態（何もしない）
-//   ボタン短押し → その時刻を起点として9回の給餌スケジュールを開始
-//   ボタン長押し → その場で1回転だけ実行（装填時の位置合わせ用）
+//   1回目の長押し → 原点出し。リードスイッチが反応する位置まで送って止まる。
+//                   電源投入後に1度だけ必要。以降は毎回原点で止まるので不要。
+//   2回目以降の長押し → その時刻を起点として FEED_COUNT 回の給餌を開始
+//
+//   短押しには機能を割り当てていない。ノイズや接触で誤って
+//   1日分の予定が始まらないようにするため、長押しのみを受け付ける。
 
 // ---- ピン割り当て ----------------------------------------------------------
 // SPEC §5 では P0=MOSFET / P1=ボタン だが、ここでは入れ替えている。
@@ -81,7 +85,15 @@ const uint32_t DEADBAND_MS = REV_MS / 3;
 const uint32_t TIMEOUT_MS = REV_MS * 3 / 2;
 
 const uint32_t LONGPRESS_MS = 1000;
-const uint32_t DEBOUNCE_MS  = 30;
+
+// BTN_STABLE_MS: ボタンもこの時間ずっと LOW が続いた時だけ押下とみなす。
+//   P0 も P2 と同じくモーターのブラシノイズを拾う。給餌の直後に
+//   誤って「押された」と判定されると、予定外のタイミングで回り出す。
+//   ハード側でも P0→5V に 5.1kΩ、P0→GND に 1µF を入れること。
+const uint32_t BTN_STABLE_MS = 30;
+
+// HOMING_MAX_MS: 原点出しの上限。1回転より少し長く取る。
+const uint32_t HOMING_MAX_MS = REV_MS * 3 / 2;
 
 // REED_STABLE_MS: この時間ずっと LOW が続いた時だけ検出とみなす。
 //   モーターのブラシノイズが P2 に乗ると、リードスイッチの状態と無関係に
@@ -93,6 +105,7 @@ const uint32_t DEBOUNCE_MS  = 30;
 const uint32_t REED_STABLE_MS = 30;
 
 // ---- 状態 ------------------------------------------------------------------
+bool     homed     = false;  // 電源投入後に一度でも原点出しをしたか
 bool     running   = false;  // false = 待機中, true = スケジュール進行中
 uint32_t startedAt = 0;      // 起点（ボタンを押した時刻）
 uint8_t  fedCount  = 0;      // 今日すでに出した回数
@@ -130,6 +143,20 @@ bool reedDetected() {
   return true;
 }
 
+// ボタンが BTN_STABLE_MS のあいだ押され続けていたら true。
+bool buttonPressed() {
+  if (digitalRead(PIN_BUTTON) == HIGH) {
+    return false;
+  }
+  const uint32_t s = millis();
+  while (millis() - s < BTN_STABLE_MS) {
+    if (digitalRead(PIN_BUTTON) == HIGH) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // スクリューを1回転させる。成功したら true。
 // 回転中は他にやることが無いのでブロッキングで書く。millis() は動き続ける。
 bool rotateOnce() {
@@ -153,6 +180,25 @@ bool rotateOnce() {
   return true;
 }
 
+// 原点出し。リードスイッチが反応する位置までスクリューを送る。
+// 既に反応している位置なら動かさない。
+void homing() {
+  if (reedDetected()) {
+    return;
+  }
+
+  digitalWrite(PIN_MOTOR, HIGH);
+  const uint32_t t0 = millis();
+
+  while (!reedDetected()) {
+    if (millis() - t0 >= HOMING_MAX_MS) {
+      break;
+    }
+  }
+
+  digitalWrite(PIN_MOTOR, LOW);
+}
+
 // i 回目（0始まり）の給餌が起点から何ミリ秒後かを返す。
 // 最大でも 900分 = 54,000,000ms なので uint32_t に収まる。
 uint32_t scheduledAt(uint8_t i) {
@@ -169,28 +215,30 @@ void loop() {
   const uint32_t now = millis();
 
   // ---- ボタン ----
-  const bool pressed = (digitalRead(PIN_BUTTON) == LOW);
+  // 受け付けるのは長押しのみ。短押しには機能を割り当てていない。
+  const bool pressed = buttonPressed();
 
   if (pressed && !btnDown) {
     btnDown     = true;
     btnDownAt   = now;
     longHandled = false;
   } else if (pressed && btnDown) {
-    // 長押し判定は押している最中に行う（離す前に反応させる）
     if (!longHandled && now - btnDownAt >= LONGPRESS_MS) {
       longHandled = true;
-      rotateOnce();  // 手動で1回転。スケジュールには影響しない
+
+      if (!homed) {
+        // 電源投入後の1回目。原点を決めるだけで、予定は始めない。
+        homing();
+        homed = true;
+      } else if (!running) {
+        // 2回目以降。ここからが1日分の予定。
+        startDay();
+      }
+      // 進行中の長押しは無視する。誤操作で起点がリセットされ、
+      // 1日に FEED_COUNT 回を超えて出てしまうのを防ぐため。
     }
   } else if (!pressed && btnDown) {
     btnDown = false;
-    if (!longHandled && now - btnDownAt >= DEBOUNCE_MS) {
-      // 短押し。待機中のときだけスケジュールを開始する。
-      // 進行中の短押しを無視するのは、誤操作で起点がリセットされ
-      // 1日に9回を超えて出てしまうのを防ぐため。
-      if (!running) {
-        startDay();
-      }
-    }
   }
 
   // ---- スケジュール ----
