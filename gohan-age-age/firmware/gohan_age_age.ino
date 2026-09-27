@@ -74,6 +74,15 @@ const uint32_t TIMEOUT_MS = REV_MS * 3 / 2;
 const uint32_t LONGPRESS_MS = 1000;
 const uint32_t DEBOUNCE_MS  = 30;
 
+// REED_STABLE_MS: この時間ずっと LOW が続いた時だけ検出とみなす。
+//   モーターのブラシノイズが P2 に乗ると、リードスイッチの状態と無関係に
+//   瞬間的な LOW が読まれる。1回だけの読み取りでは誤検出する。
+//
+//   これはあくまで保険で、本命はハード側の対策（P2→5V のプルアップ
+//   4.7k〜10kΩ と、P2→GND の 0.1µF）。SPEC §6 を参照。
+//   磁石が検出範囲にいる時間は数百msあるので、10ms は十分短い。
+const uint32_t REED_STABLE_MS = 10;
+
 // ---- 状態 ------------------------------------------------------------------
 bool     running   = false;  // false = 待機中, true = スケジュール進行中
 uint32_t startedAt = 0;      // 起点（ボタンを押した時刻）
@@ -97,6 +106,21 @@ void setup() {
   // まとめて排出する事故につながるため意図的に実装しない（SPEC §5）。
 }
 
+// REED_STABLE_MS の間ずっと LOW が続いたら true。
+// 途中で一度でも HIGH に戻ればノイズとみなして false。
+bool reedDetected() {
+  if (digitalRead(PIN_REED) == HIGH) {
+    return false;
+  }
+  const uint32_t s = millis();
+  while (millis() - s < REED_STABLE_MS) {
+    if (digitalRead(PIN_REED) == HIGH) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // スクリューを1回転させる。成功したら true。
 // 回転中は他にやることが無いのでブロッキングで書く。millis() は動き続ける。
 bool rotateOnce() {
@@ -109,7 +133,7 @@ bool rotateOnce() {
   }
 
   // 2. 磁石の検出を待つ
-  while (digitalRead(PIN_REED) == HIGH) {
+  while (!reedDetected()) {
     if (millis() - t0 >= TIMEOUT_MS) {
       digitalWrite(PIN_MOTOR, LOW);
       return false;  // 詰まりなどで1回転できなかった。この回は諦める

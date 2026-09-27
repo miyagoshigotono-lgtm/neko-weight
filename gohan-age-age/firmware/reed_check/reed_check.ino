@@ -30,6 +30,24 @@ const uint32_t DEADBAND_MS = 1000;
 // 1回転（実測で約6秒）より確実に長く、かつ餌が出過ぎない範囲で。
 const uint32_t MAX_RUN_MS = 15000;
 
+// この時間ずっと LOW が続いた時だけ検出とみなす。
+// モーターのブラシノイズによる瞬間的な誤検出を弾くための保険。
+// 本命はハード側（P2→5V のプルアップ、P2→GND の 0.1µF）。
+const uint32_t REED_STABLE_MS = 10;
+
+bool reedDetected() {
+  if (digitalRead(PIN_REED) == HIGH) {
+    return false;
+  }
+  const uint32_t s = millis();
+  while (millis() - s < REED_STABLE_MS) {
+    if (digitalRead(PIN_REED) == HIGH) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void setup() {
   digitalWrite(PIN_MOTOR, LOW);
   pinMode(PIN_MOTOR, OUTPUT);
@@ -52,7 +70,7 @@ void loop() {
   while (millis() - t0 < DEADBAND_MS) {
   }
 
-  while (digitalRead(PIN_REED) == HIGH) {
+  while (!reedDetected()) {
     if (millis() - t0 >= MAX_RUN_MS) {
       break;
     }
