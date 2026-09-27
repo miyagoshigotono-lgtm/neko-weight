@@ -25,21 +25,30 @@ const uint8_t PIN_BUTTON = 0;  // 装填完了ボタン（内蔵プルアップ�
 const uint8_t PIN_REED   = 2;  // リードスイッチ（内蔵プルアップ、磁石検出でLOW）
 
 // ---- 給餌スケジュール ------------------------------------------------------
-// 起点+60分に1回目、以降105分間隔、9回目は起点+15時間。
+// FEED_COUNT はパイプの部屋数と一致させること。
+// 実機のスクリューは6部屋で造形した。
+//
+// 起点+60分に1回目、以降168分間隔、6回目は起点+15時間。
+//   60 + 168 × 5 = 900分 = 15時間
 // SPEC §8 の通り、この時間割は運用しながら調整する。
-const uint8_t  FEED_COUNT      = 9;
+const uint8_t  FEED_COUNT      = 6;
 const uint32_t FIRST_DELAY_MIN = 60;
-const uint32_t INTERVAL_MIN    = 105;
+const uint32_t INTERVAL_MIN    = 168;
 
-// ベンチテスト用。1にすると「分」を「秒」として扱うので、
-// 15時間のスケジュールが15分で一巡する。
+// ベンチテスト用。1にすると分単位の予定を無視し、
+// TEST_INTERVAL_MS 間隔で FEED_COUNT 回ぶん動かす。
+// 6回 × (10秒 + 1回転2秒) ≒ 70秒で一巡するので、その場で確認できる。
 // 実運用の書き込み時は必ず 0 に戻すこと。
 #define TEST_MODE 0
 
+const uint32_t TEST_INTERVAL_MS = 10000UL;
+
 #if TEST_MODE
-const uint32_t MINUTE_MS = 1000UL;
+const uint32_t FIRST_DELAY_MS = TEST_INTERVAL_MS;
+const uint32_t INTERVAL_MS    = TEST_INTERVAL_MS;
 #else
-const uint32_t MINUTE_MS = 60000UL;
+const uint32_t FIRST_DELAY_MS = FIRST_DELAY_MIN * 60000UL;
+const uint32_t INTERVAL_MS    = INTERVAL_MIN * 60000UL;
 #endif
 
 // ---- 動作パラメータ --------------------------------------------------------
@@ -147,7 +156,7 @@ bool rotateOnce() {
 // i 回目（0始まり）の給餌が起点から何ミリ秒後かを返す。
 // 最大でも 900分 = 54,000,000ms なので uint32_t に収まる。
 uint32_t scheduledAt(uint8_t i) {
-  return (FIRST_DELAY_MIN + (uint32_t)i * INTERVAL_MIN) * MINUTE_MS;
+  return FIRST_DELAY_MS + (uint32_t)i * INTERVAL_MS;
 }
 
 void startDay() {
