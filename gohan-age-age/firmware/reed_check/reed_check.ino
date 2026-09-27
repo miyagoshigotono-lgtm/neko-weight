@@ -32,8 +32,11 @@ const uint32_t MAX_RUN_MS = 15000;
 
 // この時間ずっと LOW が続いた時だけ検出とみなす。
 // モーターのブラシノイズによる瞬間的な誤検出を弾くための保険。
-// 本命はハード側（P2→5V のプルアップ、P2→GND の 0.1µF）。
-const uint32_t REED_STABLE_MS = 10;
+// 本命はハード側（P2→5V に 5.1kΩ、P2→GND に 1µF）。
+//
+// RC時定数 5.1kΩ × 1µF = 5.1ms に対して十分な余裕を取って 30ms。
+// 磁石の検出時間は数百msあるので、これでも十分短い。
+const uint32_t REED_STABLE_MS = 30;
 
 bool reedDetected() {
   if (digitalRead(PIN_REED) == HIGH) {
