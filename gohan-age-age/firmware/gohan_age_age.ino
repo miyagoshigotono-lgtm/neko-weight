@@ -41,11 +41,11 @@ const uint32_t INTERVAL_MIN    = 168;
 
 // ベンチテスト用。1にすると分単位の予定を無視し、
 // TEST_INTERVAL_MS 間隔で FEED_COUNT 回ぶん動かす。
-// 6回 × (10秒 + 1回転2秒) ≒ 70秒で一巡するので、その場で確認できる。
+// 6回 × (5秒 + 1回転2秒) ≒ 42秒で一巡するので、その場で確認できる。
 // 実運用の書き込み時は必ず 0 に戻すこと。
 #define TEST_MODE 0
 
-const uint32_t TEST_INTERVAL_MS = 10000UL;
+const uint32_t TEST_INTERVAL_MS = 5000UL;
 
 #if TEST_MODE
 const uint32_t FIRST_DELAY_MS = TEST_INTERVAL_MS;
@@ -236,6 +236,12 @@ void loop() {
       }
       // 進行中の長押しは無視する。誤操作で起点がリセットされ、
       // 1日に FEED_COUNT 回を超えて出てしまうのを防ぐため。
+
+      // 処理が終わるまでボタンが押しっぱなしのことがある。
+      // 離されるまで待ってから次の判定に進む。
+      while (digitalRead(PIN_BUTTON) == LOW) {
+      }
+      btnDown = false;
     }
   } else if (!pressed && btnDown) {
     btnDown = false;
