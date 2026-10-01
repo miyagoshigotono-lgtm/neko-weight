@@ -1,5 +1,5 @@
 // ご飯アゲアゲ君 ファームウェア
-// Digispark / ATtiny85
+// Arduino Nano / ATmega328P
 // 仕様書: ../SPEC.md §5
 //
 // 動作の概要:
@@ -12,21 +12,13 @@
 //   1日分の予定が始まらないようにするため、長押しのみを受け付ける。
 
 // ---- ピン割り当て ----------------------------------------------------------
-// SPEC §5 では P0=MOSFET / P1=ボタン だが、ここでは入れ替えている。
-//
-// 理由: Digispark のオンボードLEDが P1 に載っている基板（Model A）では、
-// LED の順方向電圧 約1.9V が内蔵プルアップ（20〜50kΩ）を負けて、
-// ボタンを押していなくても P1 が常に LOW と読まれる。
-// VIH は 0.6×VCC = 3.0V なので 1.9V では HIGH にならない。
-//
-// P0 と入れ替えると、ボタンは素のピンで安定して読め、
-// LED は給餌中に点灯する動作表示として使える（副産物）。
-//
-// LED が P0 に載っている基板（Model B）なら SPEC 通りでも動く。
-// その場合は下の2行を入れ替えること。
-const uint8_t PIN_MOTOR  = 1;  // MOSFETゲート出力
-const uint8_t PIN_BUTTON = 0;  // 装填完了ボタン（内蔵プルアップ、押下でLOW）
-const uint8_t PIN_REED   = 2;  // リードスイッチ（内蔵プルアップ、磁石検出でLOW）
+// Arduino Nano（ATmega328P / 5V / 16MHz）。
+// D13 のオンボードLEDは他と共用していないので、動作表示に使える。
+// D0 / D1 は USBシリアルに繋がるため空けておく。
+const uint8_t PIN_MOTOR  = 3;  // MOSFETゲート出力
+const uint8_t PIN_BUTTON = 4;  // 装填完了ボタン（外付けプルアップ、押下でLOW）
+const uint8_t PIN_REED   = 5;  // リードスイッチ（外付けプルアップ、磁石検出でLOW）
+const uint8_t PIN_LED    = 13; // オンボードLED。給餌中に点灯
 
 // ---- 給餌スケジュール ------------------------------------------------------
 // FEED_COUNT はパイプの部屋数と一致させること。
@@ -120,6 +112,10 @@ void setup() {
   digitalWrite(PIN_MOTOR, LOW);
   pinMode(PIN_MOTOR, OUTPUT);
 
+  pinMode(PIN_LED, OUTPUT);
+  digitalWrite(PIN_LED, LOW);
+
+  // 外付けで5.1kΩのプルアップを入れてあるが、内蔵も併用して構わない。
   pinMode(PIN_BUTTON, INPUT_PULLUP);
   pinMode(PIN_REED, INPUT_PULLUP);
 
@@ -160,6 +156,7 @@ bool buttonPressed() {
 // スクリューを1回転させる。成功したら true。
 // 回転中は他にやることが無いのでブロッキングで書く。millis() は動き続ける。
 bool rotateOnce() {
+  digitalWrite(PIN_LED, HIGH);
   digitalWrite(PIN_MOTOR, HIGH);
   const uint32_t t0 = millis();
 
@@ -172,11 +169,13 @@ bool rotateOnce() {
   while (!reedDetected()) {
     if (millis() - t0 >= TIMEOUT_MS) {
       digitalWrite(PIN_MOTOR, LOW);
+      digitalWrite(PIN_LED, LOW);
       return false;  // 詰まりなどで1回転できなかった。この回は諦める
     }
   }
 
   digitalWrite(PIN_MOTOR, LOW);
+  digitalWrite(PIN_LED, LOW);
   return true;
 }
 
@@ -187,6 +186,7 @@ void homing() {
     return;
   }
 
+  digitalWrite(PIN_LED, HIGH);
   digitalWrite(PIN_MOTOR, HIGH);
   const uint32_t t0 = millis();
 
@@ -197,6 +197,7 @@ void homing() {
   }
 
   digitalWrite(PIN_MOTOR, LOW);
+  digitalWrite(PIN_LED, LOW);
 }
 
 // i 回目（0始まり）の給餌が起点から何ミリ秒後かを返す。
