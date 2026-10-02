@@ -12,10 +12,13 @@
 //   1日分の予定が始まらないようにするため、長押しのみを受け付ける。
 //
 // シリアル出力:
-//   115200bps。動作状況と、1回転の実測時間を毎回表示する。
+//   既定では無効（DEBUG_SERIAL 0）。モーターとロジックで電源を分ける手間を
+//   避けるため、通常運用では使わない。
 //
-//   デバッグ中は Nano の 5V ピンを 5Vラインから外し、USB から給電すること。
-//   外部5VとUSBを同時に繋ぐと2つの電源が押し合う。GND は共通のままでよい。
+//   DEBUG_SERIAL を 1 にすると 115200bps で動作状況と1回転の実測時間を出す。
+//   その際は Nano の 5V ピンを 5Vラインから外し、USB から給電すること。
+//   外部5VとUSBを同時に繋ぐと2つの電源が押し合い、モーターの電流が
+//   USBポートを通ってしまう。GND は共通のままでよい。
 
 // ---- ピン割り当て ----------------------------------------------------------
 // Arduino Nano（ATmega328P / 5V / 16MHz）。
@@ -25,6 +28,22 @@ const uint8_t PIN_MOTOR  = 3;  // MOSFETゲート出力
 const uint8_t PIN_BUTTON = 4;  // 装填完了ボタン（外付けプルアップ、押下でLOW）
 const uint8_t PIN_REED   = 5;  // リードスイッチ（外付けプルアップ、磁石検出でLOW）
 const uint8_t PIN_LED    = 13; // オンボードLED。給餌中に点灯
+
+// ---- デバッグ出力 ----------------------------------------------------------
+// 1 にするとシリアルに動作状況を出す。0 なら全て消えてコードにも残らない。
+#define DEBUG_SERIAL 0
+
+#if DEBUG_SERIAL
+  #define DBG_BEGIN()  do { Serial.begin(115200); while (!Serial && millis() < 2000) {} } while (0)
+  #define DBG(x)       Serial.print(x)
+  #define DBGLN(x)     Serial.println(x)
+  #define DBGNL()      Serial.println()
+#else
+  #define DBG_BEGIN()  do {} while (0)
+  #define DBG(x)       do {} while (0)
+  #define DBGLN(x)     do {} while (0)
+  #define DBGNL()      do {} while (0)
+#endif
 
 // ---- 給餌スケジュール ------------------------------------------------------
 // FEED_COUNT はパイプの部屋数と一致させること。
@@ -106,34 +125,32 @@ void setup() {
   pinMode(PIN_BUTTON, INPUT_PULLUP);
   pinMode(PIN_REED, INPUT_PULLUP);
 
-  Serial.begin(115200);
-  while (!Serial && millis() < 2000) {
-  }
+  DBG_BEGIN();
 
-  Serial.println();
-  Serial.println(F("=== gohan-age-age ==="));
+  DBGNL();
+  DBGLN(F("=== gohan-age-age ==="));
 #if TEST_MODE
-  Serial.print(F("MODE   : TEST  interval="));
-  Serial.print(TEST_INTERVAL_MS);
-  Serial.println(F("ms"));
+  DBG(F("MODE   : TEST  interval="));
+  DBG(TEST_INTERVAL_MS);
+  DBGLN(F("ms"));
 #else
-  Serial.print(F("MODE   : NORMAL  first="));
-  Serial.print(FIRST_DELAY_MIN);
-  Serial.print(F("min  interval="));
-  Serial.print(INTERVAL_MIN);
-  Serial.println(F("min"));
+  DBG(F("MODE   : NORMAL  first="));
+  DBG(FIRST_DELAY_MIN);
+  DBG(F("min  interval="));
+  DBG(INTERVAL_MIN);
+  DBGLN(F("min"));
 #endif
-  Serial.print(F("FEEDS  : "));
-  Serial.println(FEED_COUNT);
-  Serial.print(F("REV_MS : "));
-  Serial.print(REV_MS);
-  Serial.print(F("  deadband="));
-  Serial.print(DEADBAND_MS);
-  Serial.print(F("  timeout="));
-  Serial.println(TIMEOUT_MS);
-  Serial.print(F("reed   : "));
-  Serial.println(digitalRead(PIN_REED) == LOW ? F("DETECT") : F("--"));
-  Serial.println(F("ready. long-press to home."));
+  DBG(F("FEEDS  : "));
+  DBGLN(FEED_COUNT);
+  DBG(F("REV_MS : "));
+  DBG(REV_MS);
+  DBG(F("  deadband="));
+  DBG(DEADBAND_MS);
+  DBG(F("  timeout="));
+  DBGLN(TIMEOUT_MS);
+  DBG(F("reed   : "));
+  DBGLN(digitalRead(PIN_REED) == LOW ? F("DETECT") : F("--"));
+  DBGLN(F("ready. long-press to home."));
 
   lastReed = (digitalRead(PIN_REED) == LOW);
 
@@ -194,15 +211,16 @@ bool rotateOnce() {
   digitalWrite(PIN_LED, LOW);
 
   const uint32_t took = millis() - t0;
-  Serial.print(ok ? F("  OK      ") : F("  TIMEOUT "));
-  Serial.print(took);
-  Serial.print(F("ms"));
+  (void)took;  // DEBUG_SERIAL が 0 のときは未使用
+  DBG(ok ? F("  OK      ") : F("  TIMEOUT "));
+  DBG(took);
+  DBG(F("ms"));
   if (ok) {
-    Serial.print(F("   (REV_MS="));
-    Serial.print(REV_MS);
-    Serial.print(F(")"));
+    DBG(F("   (REV_MS="));
+    DBG(REV_MS);
+    DBG(F(")"));
   }
-  Serial.println();
+  DBGNL();
 
   return ok;
 }
@@ -211,11 +229,11 @@ bool rotateOnce() {
 // 既に反応している位置なら動かさない。
 void homing() {
   if (reedDetected()) {
-    Serial.println(F("[home] already at origin"));
+    DBGLN(F("[home] already at origin"));
     return;
   }
 
-  Serial.println(F("[home] start"));
+  DBGLN(F("[home] start"));
   digitalWrite(PIN_LED, HIGH);
   digitalWrite(PIN_MOTOR, HIGH);
   const uint32_t t0 = millis();
@@ -231,9 +249,10 @@ void homing() {
   digitalWrite(PIN_MOTOR, LOW);
   digitalWrite(PIN_LED, LOW);
 
-  Serial.print(ok ? F("[home] done ") : F("[home] TIMEOUT "));
-  Serial.print(millis() - t0);
-  Serial.println(F("ms"));
+  (void)ok;  // DEBUG_SERIAL が 0 のときは未使用
+  DBG(ok ? F("[home] done ") : F("[home] TIMEOUT "));
+  DBG(millis() - t0);
+  DBGLN(F("ms"));
 }
 
 // i 回目（0始まり）の給餌が起点から何ミリ秒後かを返す。
@@ -245,9 +264,9 @@ void startDay() {
   startedAt = millis();
   fedCount  = 0;
   running   = true;
-  Serial.print(F("[sched] start. "));
-  Serial.print(FEED_COUNT);
-  Serial.println(F(" feeds queued."));
+  DBG(F("[sched] start. "));
+  DBG(FEED_COUNT);
+  DBGLN(F(" feeds queued."));
 }
 
 void loop() {
@@ -258,8 +277,8 @@ void loop() {
     const bool r = (digitalRead(PIN_REED) == LOW);
     if (r != lastReed) {
       lastReed = r;
-      Serial.print(F("[reed] "));
-      Serial.println(r ? F("DETECT") : F("--"));
+      DBG(F("[reed] "));
+      DBGLN(r ? F("DETECT") : F("--"));
     }
   }
 
@@ -274,16 +293,16 @@ void loop() {
   } else if (pressed && btnDown) {
     if (!longHandled && now - btnDownAt >= LONGPRESS_MS) {
       longHandled = true;
-      Serial.println(F("[btn] long press"));
+      DBGLN(F("[btn] long press"));
 
       if (!homed) {
         homing();
         homed = true;
-        Serial.println(F("ready. long-press to start schedule."));
+        DBGLN(F("ready. long-press to start schedule."));
       } else if (!running) {
         startDay();
       } else {
-        Serial.println(F("[btn] ignored (schedule running)"));
+        DBGLN(F("[btn] ignored (schedule running)"));
       }
 
       // 処理が終わるまでボタンが押しっぱなしのことがある。
@@ -299,18 +318,18 @@ void loop() {
   // ---- スケジュール ----
   if (running && fedCount < FEED_COUNT) {
     if (now - startedAt >= scheduledAt(fedCount)) {
-      Serial.print(F("[feed "));
-      Serial.print(fedCount + 1);
-      Serial.print(F("/"));
-      Serial.print(FEED_COUNT);
-      Serial.println(F("]"));
+      DBG(F("[feed "));
+      DBG(fedCount + 1);
+      DBG(F("/"));
+      DBG(FEED_COUNT);
+      DBGLN(F("]"));
 
       rotateOnce();  // 失敗しても回数は進める。次回に持ち越さない
       fedCount++;
 
       if (fedCount >= FEED_COUNT) {
         running = false;  // 今日の分は終わり。次の装填を待つ
-        Serial.println(F("[sched] done. long-press to start again."));
+        DBGLN(F("[sched] done. long-press to start again."));
         lastReed = (digitalRead(PIN_REED) == LOW);
       }
     }
