@@ -71,7 +71,10 @@ const uint32_t DEADBAND_MS = REV_MS / 3;
 //   なく磁石の位置で行うので、途中で止まっても次回が続きから回して帳尻が合う。
 const uint32_t TIMEOUT_MS = REV_MS * 3 / 2;
 
-const uint32_t LONGPRESS_MS  = 1000;
+// LONGPRESS_MS: この時間ずっと押し続けないと受け付けない。
+//   猫が偶然ボタンに触れて1日分の予定が始まるのを防ぐため3秒に設定。
+//   猫の肉球が3秒間一定の力で押し続けることは考えにくい。
+const uint32_t LONGPRESS_MS  = 3000;
 const uint32_t HOMING_MAX_MS = REV_MS * 3 / 2;
 
 // 入力はどちらも、この時間ずっと LOW が続いた時だけ有効とみなす。
