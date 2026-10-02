@@ -10,6 +10,12 @@
 //
 //   短押しには機能を割り当てていない。ノイズや接触で誤って
 //   1日分の予定が始まらないようにするため、長押しのみを受け付ける。
+//
+// シリアル出力:
+//   115200bps。動作状況と、1回転の実測時間を毎回表示する。
+//
+//   デバッグ中は Nano の 5V ピンを 5Vラインから外し、USB から給電すること。
+//   外部5VとUSBを同時に繋ぐと2つの電源が押し合う。GND は共通のままでよい。
 
 // ---- ピン割り当て ----------------------------------------------------------
 // Arduino Nano（ATmega328P / 5V / 16MHz）。
@@ -26,14 +32,12 @@ const uint8_t PIN_LED    = 13; // オンボードLED。給餌中に点灯
 //
 // 起点+60分に1回目、以降168分間隔、6回目は起点+15時間。
 //   60 + 168 × 5 = 900分 = 15時間
-// SPEC §8 の通り、この時間割は運用しながら調整する。
 const uint8_t  FEED_COUNT      = 6;
 const uint32_t FIRST_DELAY_MIN = 60;
 const uint32_t INTERVAL_MIN    = 168;
 
 // ベンチテスト用。1にすると分単位の予定を無視し、
 // TEST_INTERVAL_MS 間隔で FEED_COUNT 回ぶん動かす。
-// 6回 × (5秒 + 1回転2秒) ≒ 42秒で一巡するので、その場で確認できる。
 // 実運用の書き込み時は必ず 0 に戻すこと。
 #define TEST_MODE 0
 
@@ -49,52 +53,32 @@ const uint32_t INTERVAL_MS    = INTERVAL_MIN * 60000UL;
 
 // ---- 動作パラメータ --------------------------------------------------------
 // REV_MS: ギヤボックスを繋いだ状態での1回転の所要時間（ミリ秒）。
-//   **ここだけを実測値に書き換えれば、下の2つは自動で追従する。**
-//   測定は firmware/rev_time_test/ のスケッチで行う。
-//
-//   実測値: 10回転で20.5秒（ストップウォッチ）→ 1回転 2.03秒。
+//   ここだけを実測値に書き換えれば、下の2つは自動で追従する。
+//   シリアルに毎回の実測値が出るので、ずれていたら合わせること。
 const uint32_t REV_MS = 2030;
 
 // DEADBAND_MS: 回転開始からリードスイッチを無視する時間。
 //   停止時の惰性で磁石を僅かに行き過ぎるため、これが無いと
 //   回し始めた瞬間に「即検出→即停止」となり1ピッチ回らない。
-//
-//   必要な条件:  磁石が検出範囲を抜ける時間 < DEADBAND_MS < 1回転の時間
+//   必要な条件: 磁石が検出範囲を抜ける時間 < DEADBAND_MS < 1回転の時間
 const uint32_t DEADBAND_MS = REV_MS / 3;
 
 // TIMEOUT_MS: この時間内に検出できなければ諦める。
+//   必要な条件: 1回転の時間 < TIMEOUT_MS < 1回転の時間 × 2
 //
-//   必要な条件:  1回転の時間 < TIMEOUT_MS < 1回転の時間 × 2
-//
-//   上限が重要。リードスイッチが反応しなかった場合、モーターはこの時間
-//   ずっと回り続けるため、長く取るとその分だけ餌が余計に出る。
-//   SPEC §5 の初期値は10秒だが、仮に1回転0.5秒なら20回転に相当し、
-//   1日分を全部排出してしまう。固定値ではなく実測値から決めること。
-//
-//   短すぎる側は安全。検出は時間ではなく磁石の位置で行うので、
-//   途中で止まっても次の給餌が続きから回して帳尻が合う。
-//   最悪でも「その回が少なめ」で済み、出し過ぎにはならない。
+//   上限が重要。検出できなかった場合モーターはこの時間ずっと回り続けるため、
+//   長く取るとその分だけ餌が余計に出る。短すぎる側は安全で、検出は時間では
+//   なく磁石の位置で行うので、途中で止まっても次回が続きから回して帳尻が合う。
 const uint32_t TIMEOUT_MS = REV_MS * 3 / 2;
 
-const uint32_t LONGPRESS_MS = 1000;
-
-// BTN_STABLE_MS: ボタンもこの時間ずっと LOW が続いた時だけ押下とみなす。
-//   P0 も P2 と同じくモーターのブラシノイズを拾う。給餌の直後に
-//   誤って「押された」と判定されると、予定外のタイミングで回り出す。
-//   ハード側でも P0→5V に 5.1kΩ、P0→GND に 1µF を入れること。
-const uint32_t BTN_STABLE_MS = 30;
-
-// HOMING_MAX_MS: 原点出しの上限。1回転より少し長く取る。
+const uint32_t LONGPRESS_MS  = 1000;
 const uint32_t HOMING_MAX_MS = REV_MS * 3 / 2;
 
-// REED_STABLE_MS: この時間ずっと LOW が続いた時だけ検出とみなす。
-//   モーターのブラシノイズが P2 に乗ると、リードスイッチの状態と無関係に
-//   瞬間的な LOW が読まれる。1回だけの読み取りでは誤検出する。
-//
-//   これはあくまで保険で、本命はハード側の対策（P2→5V のプルアップ
-//   5.1kΩ と、P2→GND の 1µF）。SPEC §6 を参照。
-//   RC時定数 5.1ms に対して余裕を取った値。磁石の検出時間は数百msなので十分短い。
+// 入力はどちらも、この時間ずっと LOW が続いた時だけ有効とみなす。
+// モーターのブラシノイズによる瞬間的な誤検出を弾くための保険。
+// 本命はハード側（D4 / D5 を 5.1kΩ で 5V へ、1µF で GND へ）。
 const uint32_t REED_STABLE_MS = 30;
+const uint32_t BTN_STABLE_MS  = 30;
 
 // ---- 状態 ------------------------------------------------------------------
 bool     homed     = false;  // 電源投入後に一度でも原点出しをしたか
@@ -106,9 +90,9 @@ bool     btnDown     = false;
 uint32_t btnDownAt   = 0;
 bool     longHandled = false;
 
+bool lastReed = false;       // 待機中にリードの状態変化を表示するため
+
 void setup() {
-  // 電源投入直後にモーターが回らないよう、出力を LOW にしてから出力に切り替える。
-  // ハードウェア側のゲートプルダウン10kΩと合わせて二重に担保する。
   digitalWrite(PIN_MOTOR, LOW);
   pinMode(PIN_MOTOR, OUTPUT);
 
@@ -119,13 +103,43 @@ void setup() {
   pinMode(PIN_BUTTON, INPUT_PULLUP);
   pinMode(PIN_REED, INPUT_PULLUP);
 
+  Serial.begin(115200);
+  while (!Serial && millis() < 2000) {
+  }
+
+  Serial.println();
+  Serial.println(F("=== gohan-age-age ==="));
+#if TEST_MODE
+  Serial.print(F("MODE   : TEST  interval="));
+  Serial.print(TEST_INTERVAL_MS);
+  Serial.println(F("ms"));
+#else
+  Serial.print(F("MODE   : NORMAL  first="));
+  Serial.print(FIRST_DELAY_MIN);
+  Serial.print(F("min  interval="));
+  Serial.print(INTERVAL_MIN);
+  Serial.println(F("min"));
+#endif
+  Serial.print(F("FEEDS  : "));
+  Serial.println(FEED_COUNT);
+  Serial.print(F("REV_MS : "));
+  Serial.print(REV_MS);
+  Serial.print(F("  deadband="));
+  Serial.print(DEADBAND_MS);
+  Serial.print(F("  timeout="));
+  Serial.println(TIMEOUT_MS);
+  Serial.print(F("reed   : "));
+  Serial.println(digitalRead(PIN_REED) == LOW ? F("DETECT") : F("--"));
+  Serial.println(F("ready. long-press to home."));
+
+  lastReed = (digitalRead(PIN_REED) == LOW);
+
   // 停電・再起動後は待機状態。人がボタンを押すまで一切動かさない。
   // 「残り回数を推定して出す」といった復旧動作は、誤爆で1日分を
   // まとめて排出する事故につながるため意図的に実装しない（SPEC §5）。
 }
 
 // REED_STABLE_MS の間ずっと LOW が続いたら true。
-// 途中で一度でも HIGH に戻ればノイズとみなして false。
 bool reedDetected() {
   if (digitalRead(PIN_REED) == HIGH) {
     return false;
@@ -139,7 +153,7 @@ bool reedDetected() {
   return true;
 }
 
-// ボタンが BTN_STABLE_MS のあいだ押され続けていたら true。
+// BTN_STABLE_MS の間ずっと押され続けていたら true。
 bool buttonPressed() {
   if (digitalRead(PIN_BUTTON) == HIGH) {
     return false;
@@ -162,46 +176,64 @@ bool rotateOnce() {
 
   // 1. 不感帯: 磁石が現在位置から抜けるまで検出しない
   while (millis() - t0 < DEADBAND_MS) {
-    // 待つだけ
   }
 
   // 2. 磁石の検出を待つ
+  bool ok = true;
   while (!reedDetected()) {
     if (millis() - t0 >= TIMEOUT_MS) {
-      digitalWrite(PIN_MOTOR, LOW);
-      digitalWrite(PIN_LED, LOW);
-      return false;  // 詰まりなどで1回転できなかった。この回は諦める
-    }
-  }
-
-  digitalWrite(PIN_MOTOR, LOW);
-  digitalWrite(PIN_LED, LOW);
-  return true;
-}
-
-// 原点出し。リードスイッチが反応する位置までスクリューを送る。
-// 既に反応している位置なら動かさない。
-void homing() {
-  if (reedDetected()) {
-    return;
-  }
-
-  digitalWrite(PIN_LED, HIGH);
-  digitalWrite(PIN_MOTOR, HIGH);
-  const uint32_t t0 = millis();
-
-  while (!reedDetected()) {
-    if (millis() - t0 >= HOMING_MAX_MS) {
+      ok = false;
       break;
     }
   }
 
   digitalWrite(PIN_MOTOR, LOW);
   digitalWrite(PIN_LED, LOW);
+
+  const uint32_t took = millis() - t0;
+  Serial.print(ok ? F("  OK      ") : F("  TIMEOUT "));
+  Serial.print(took);
+  Serial.print(F("ms"));
+  if (ok) {
+    Serial.print(F("   (REV_MS="));
+    Serial.print(REV_MS);
+    Serial.print(F(")"));
+  }
+  Serial.println();
+
+  return ok;
+}
+
+// 原点出し。リードスイッチが反応する位置までスクリューを送る。
+// 既に反応している位置なら動かさない。
+void homing() {
+  if (reedDetected()) {
+    Serial.println(F("[home] already at origin"));
+    return;
+  }
+
+  Serial.println(F("[home] start"));
+  digitalWrite(PIN_LED, HIGH);
+  digitalWrite(PIN_MOTOR, HIGH);
+  const uint32_t t0 = millis();
+
+  bool ok = true;
+  while (!reedDetected()) {
+    if (millis() - t0 >= HOMING_MAX_MS) {
+      ok = false;
+      break;
+    }
+  }
+
+  digitalWrite(PIN_MOTOR, LOW);
+  digitalWrite(PIN_LED, LOW);
+
+  Serial.print(ok ? F("[home] done ") : F("[home] TIMEOUT "));
+  Serial.print(millis() - t0);
+  Serial.println(F("ms"));
 }
 
 // i 回目（0始まり）の給餌が起点から何ミリ秒後かを返す。
-// 最大でも 900分 = 54,000,000ms なので uint32_t に収まる。
 uint32_t scheduledAt(uint8_t i) {
   return FIRST_DELAY_MS + (uint32_t)i * INTERVAL_MS;
 }
@@ -210,10 +242,23 @@ void startDay() {
   startedAt = millis();
   fedCount  = 0;
   running   = true;
+  Serial.print(F("[sched] start. "));
+  Serial.print(FEED_COUNT);
+  Serial.println(F(" feeds queued."));
 }
 
 void loop() {
   const uint32_t now = millis();
+
+  // ---- 待機中のリード状態の変化を表示 ----
+  if (!running) {
+    const bool r = (digitalRead(PIN_REED) == LOW);
+    if (r != lastReed) {
+      lastReed = r;
+      Serial.print(F("[reed] "));
+      Serial.println(r ? F("DETECT") : F("--"));
+    }
+  }
 
   // ---- ボタン ----
   // 受け付けるのは長押しのみ。短押しには機能を割り当てていない。
@@ -226,17 +271,17 @@ void loop() {
   } else if (pressed && btnDown) {
     if (!longHandled && now - btnDownAt >= LONGPRESS_MS) {
       longHandled = true;
+      Serial.println(F("[btn] long press"));
 
       if (!homed) {
-        // 電源投入後の1回目。原点を決めるだけで、予定は始めない。
         homing();
         homed = true;
+        Serial.println(F("ready. long-press to start schedule."));
       } else if (!running) {
-        // 2回目以降。ここからが1日分の予定。
         startDay();
+      } else {
+        Serial.println(F("[btn] ignored (schedule running)"));
       }
-      // 進行中の長押しは無視する。誤操作で起点がリセットされ、
-      // 1日に FEED_COUNT 回を超えて出てしまうのを防ぐため。
 
       // 処理が終わるまでボタンが押しっぱなしのことがある。
       // 離されるまで待ってから次の判定に進む。
@@ -251,10 +296,19 @@ void loop() {
   // ---- スケジュール ----
   if (running && fedCount < FEED_COUNT) {
     if (now - startedAt >= scheduledAt(fedCount)) {
+      Serial.print(F("[feed "));
+      Serial.print(fedCount + 1);
+      Serial.print(F("/"));
+      Serial.print(FEED_COUNT);
+      Serial.println(F("]"));
+
       rotateOnce();  // 失敗しても回数は進める。次回に持ち越さない
       fedCount++;
+
       if (fedCount >= FEED_COUNT) {
         running = false;  // 今日の分は終わり。次の装填を待つ
+        Serial.println(F("[sched] done. long-press to start again."));
+        lastReed = (digitalRead(PIN_REED) == LOW);
       }
     }
   }
