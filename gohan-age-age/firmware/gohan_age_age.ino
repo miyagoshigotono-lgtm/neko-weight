@@ -2,13 +2,14 @@
 // Arduino Nano / ATmega328P
 // 仕様書: ../SPEC.md §5
 //
-// ベンチテストで時間を縮めたい時は FIRST_DELAY_MS と INTERVAL_MS の
-// 2つだけを書き換える。条件コンパイルは使わない。
+// ベンチテストで時間を縮めたい時は INTERVAL_MS だけを書き換える。
+// 条件コンパイルは使わない。
 //
 // 動作:
 //   電源投入       → 待機。何もしない
 //   1回目の3秒長押し → 原点出し。リードスイッチが反応する位置まで送って止まる
-//   2回目の3秒長押し → そこを起点に FEED_COUNT 回の給餌を開始
+//   2回目の3秒長押し → その場で1回目を給餌し、そこからインターバルを開始。
+//                      すぐ回ることが「タイマーが始まった」合図になる
 //   進行中の長押し   → 無視
 
 // ---- ピン ------------------------------------------------------------------
@@ -21,11 +22,10 @@ const uint8_t PIN_LED    = 13;  // オンボードLED。動作中に点灯
 // 部屋数と一致させること。実機のスクリューは6部屋。
 const uint8_t FEED_COUNT = 6;
 
-// 起点+60分に1回目、以降168分間隔、6回目が起点+15時間。
-//   60 + 168 × 5 = 900分 = 15時間
-// ベンチテストの時は両方 5000UL（5秒）にする。
-const uint32_t FIRST_DELAY_MS = 3600000UL;   // 60分
-const uint32_t INTERVAL_MS    = 10080000UL;  // 168分
+// ボタンを押した時点で1回目を出し、以降この間隔で残り5回。
+//   180分 × 5 = 900分 = 15時間後に6回目
+// ベンチテストの時は 5000UL（5秒）にする。
+const uint32_t INTERVAL_MS = 10800000UL;  // 180分
 
 // ---- 動作パラメータ --------------------------------------------------------
 // 1回転の実測時間。ここを変えれば下の2つが追従する。
@@ -189,9 +189,12 @@ void loop() {
         homing();
         homed = true;
       } else if (!running) {
+        // その場で1回目を出す。すぐ回ることが
+        // 「タイマーが始まった」という目に見える合図になる。
         startedAt = now;
-        fedCount  = 0;
-        running   = true;
+        rotateOnce();
+        fedCount = 1;
+        running  = (FEED_COUNT > 1);
       }
       // 進行中なら無視する。起点がリセットされて
       // 1日に FEED_COUNT 回を超えて出るのを防ぐため。
@@ -210,7 +213,7 @@ void loop() {
 
   // ---- スケジュール ----
   if (running && fedCount < FEED_COUNT) {
-    uint32_t due = FIRST_DELAY_MS + (uint32_t)fedCount * INTERVAL_MS;
+    uint32_t due = (uint32_t)fedCount * INTERVAL_MS;
     if (now - startedAt >= due) {
       rotateOnce();
       fedCount++;
