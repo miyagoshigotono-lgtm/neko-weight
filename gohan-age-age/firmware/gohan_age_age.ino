@@ -49,9 +49,16 @@ const uint32_t LONGPRESS_MS = 3000;
 // これが無いと、3秒の途中で一瞬でも接触が切れた時に振り出しへ戻る。
 const uint32_t RELEASE_MS = 50;
 
+// 回転開始からこの時間より前の検出は無視する。
+// 1回転が約2秒なので、1.2秒より前に磁石が戻ってくることはない。
+// 磁石から離れる判定（reedCleared）とは独立しているので、
+// 検出範囲が広くても成立する。ノイズによる早期停止を防ぐための下限。
+const uint32_t MIN_RUN_MS = REV_MS * 3 / 5;   // 1218ms
+
 // リードスイッチの判定時間。この時間ずっと同じ状態が続いたら確定とみなす。
 // モーターのブラシノイズによる瞬間的な誤検出を弾く。
-const uint32_t REED_STABLE_MS = 30;
+// 磁石の検出時間は数百msあるので、100msでも十分短い。
+const uint32_t REED_STABLE_MS = 100;
 
 // ---- 状態 ------------------------------------------------------------------
 bool     homed       = false;  // 電源投入後に原点出しを済ませたか
@@ -128,9 +135,12 @@ void rotateOnce() {
     }
   }
 
-  // 2. 次に磁石を検出するまで
-  while (!reedDetected()) {
+  // 2. 次に磁石を検出するまで。ただし MIN_RUN_MS より前の検出は信じない。
+  while (true) {
     if (millis() - t0 >= TIMEOUT_MS) {
+      break;
+    }
+    if (millis() - t0 >= MIN_RUN_MS && reedDetected()) {
       break;
     }
   }
