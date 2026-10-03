@@ -31,13 +31,10 @@ const uint32_t INTERVAL_MS    = 10080000UL;  // 168分
 // 1回転の実測時間。ここを変えれば下の2つが追従する。
 const uint32_t REV_MS = 2030;
 
-// 回転開始から、この時間はリードスイッチを見ない。
-// 停止時の惰性で磁石を僅かに行き過ぎるため、これが無いと
-// 回し始めた瞬間に「即検出→即停止」となり1ピッチ回らない。
-const uint32_t DEADBAND_MS = REV_MS / 3;      // 676ms
-
-// この時間で検出できなければ諦めて止める。
-// 長く取ると検出失敗時に餌が出過ぎる。1回転と2回転の間に収める。
+// この時間で検出できなければ諦めて止める。回転開始からの合計時間。
+// 長く取ると検出失敗時に餌が出過ぎるので、1回転と2回転の間に収める。
+// 検出は時間ではなく磁石の位置で行うので、途中で止まっても次回が
+// 続きから回して帳尻が合う。短すぎる側は安全。
 const uint32_t TIMEOUT_MS = REV_MS * 3 / 2;   // 3045ms
 
 // 原点出しの上限。
@@ -52,7 +49,7 @@ const uint32_t LONGPRESS_MS = 3000;
 // これが無いと、3秒の途中で一瞬でも接触が切れた時に振り出しへ戻る。
 const uint32_t RELEASE_MS = 50;
 
-// リードスイッチがこの時間ずっと LOW なら検出とみなす。
+// リードスイッチの判定時間。この時間ずっと同じ状態が続いたら確定とみなす。
 // モーターのブラシノイズによる瞬間的な誤検出を弾く。
 const uint32_t REED_STABLE_MS = 30;
 
@@ -84,7 +81,7 @@ void setup() {
   // 排出する事故につながるため意図的に実装しない。
 }
 
-// リードスイッチが REED_STABLE_MS のあいだ連続で LOW なら true。
+// リードスイッチが REED_STABLE_MS のあいだ連続で LOW なら true（磁石を検出）。
 bool reedDetected() {
   if (digitalRead(PIN_REED) == HIGH) {
     return false;
@@ -98,16 +95,40 @@ bool reedDetected() {
   return true;
 }
 
+// リードスイッチが REED_STABLE_MS のあいだ連続で HIGH なら true（磁石から離れた）。
+bool reedCleared() {
+  if (digitalRead(PIN_REED) == LOW) {
+    return false;
+  }
+  uint32_t s = millis();
+  while (millis() - s < REED_STABLE_MS) {
+    if (digitalRead(PIN_REED) == LOW) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // スクリューを1回転させる。
 // 回転中は他にやることが無いのでブロッキングで書く。millis() は動き続ける。
+//
+// 固定時間の不感帯は使わない。磁石の検出範囲が何度ぶんあるか分からないため、
+// 時間で待つと「まだ磁石の上にいるのに不感帯が明ける」ことが起きる。
+// 代わりに、まず磁石から離れたことを確認してから、次の検出を待つ。
+// これなら検出範囲の広さに関係なく、必ず1回転で止まる。
 void rotateOnce() {
   digitalWrite(PIN_LED, HIGH);
   digitalWrite(PIN_MOTOR, HIGH);
   uint32_t t0 = millis();
 
-  while (millis() - t0 < DEADBAND_MS) {
+  // 1. 磁石から離れるまで
+  while (!reedCleared()) {
+    if (millis() - t0 >= TIMEOUT_MS) {
+      break;
+    }
   }
 
+  // 2. 次に磁石を検出するまで
   while (!reedDetected()) {
     if (millis() - t0 >= TIMEOUT_MS) {
       break;
