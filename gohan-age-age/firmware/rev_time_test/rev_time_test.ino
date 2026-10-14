@@ -20,11 +20,28 @@
 //
 // 注意:
 //   パイプは空にしておく。REVS 回ぶんの餌が出る。
-//   P1 はオンボードLEDと共用なので、回転中はLEDが点灯する。
+//   MOTOR_DUTY は本体側と同じ値にすること。
 
-const uint8_t PIN_MOTOR  = 1;
-const uint8_t PIN_BUTTON = 0;
-const uint8_t PIN_REED   = 2;
+const uint8_t PIN_MOTOR  = 3;
+const uint8_t PIN_BUTTON = 4;
+const uint8_t PIN_REED   = 5;
+
+// 本体側の MOTOR_DUTY と必ず同じ値にすること。
+// 違う値で測ると、得られた REV_MS が本番の速度と合わない。
+const uint8_t  MOTOR_DUTY = 150;
+const uint32_t KICK_MS    = 150;
+
+void motorOn() {
+  OCR2B = 255;
+  TCCR2A |= _BV(COM2B1);
+  delay(KICK_MS);
+  OCR2B = MOTOR_DUTY;
+}
+
+void motorOff() {
+  TCCR2A &= ~_BV(COM2B1);
+  digitalWrite(PIN_MOTOR, LOW);
+}
 
 // 計測する回転数。多いほど平均の精度が上がる。
 const uint8_t REVS = 10;
@@ -67,7 +84,7 @@ void homing() {
   }
 
   const uint32_t t0 = millis();
-  digitalWrite(PIN_MOTOR, HIGH);
+  motorOn();
 
   while (!reedDetected()) {
     if (millis() - t0 >= HOMING_MAX_MS) {
@@ -75,13 +92,13 @@ void homing() {
     }
   }
 
-  digitalWrite(PIN_MOTOR, LOW);
+  motorOff();
 }
 
 // REVS 回ぶん回して止まる。
 void measure() {
   const uint32_t t0 = millis();
-  digitalWrite(PIN_MOTOR, HIGH);
+  motorOn();
 
   // 原点の磁石から離れるまで待つ
   while (millis() - t0 < DEADBAND_MS) {
@@ -107,12 +124,18 @@ void measure() {
     }
   }
 
-  digitalWrite(PIN_MOTOR, LOW);
+  motorOff();
 }
 
 void setup() {
   digitalWrite(PIN_MOTOR, LOW);
   pinMode(PIN_MOTOR, OUTPUT);
+
+  // D3 = OC2B。分周なし Fast PWM で 62.5kHz。
+  TCCR2A = _BV(WGM21) | _BV(WGM20);
+  TCCR2B = _BV(CS20);
+  OCR2B  = 0;
+
   pinMode(PIN_BUTTON, INPUT_PULLUP);
   pinMode(PIN_REED, INPUT_PULLUP);
 }

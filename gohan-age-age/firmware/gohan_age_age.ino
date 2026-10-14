@@ -42,6 +42,24 @@ const uint16_t SCHEDULE[FEED_COUNT] = { 0, 90, 180, 300, 480, 540 };
 // もっと短くしたい時は SCHEDULE を { 0, 5, 10, 15, 20, 25 } にする。
 const uint32_t UNIT_MS = 60000UL;
 
+// ---- モーターの速度 --------------------------------------------------------
+// FA-130 を 5V で回すと高い回転音が出て猫が怖がる。PWM で平均電圧を下げる。
+// FA-130 の定格は 1.5〜3V なので、下げることは定格内に戻すことでもある。
+//
+// D3 は OC2B（Timer2）。分周なしの Fast PWM で 16MHz / 256 = 62.5kHz。
+// 猫の可聴上限（約64kHz）の際どい所だが、感度は40kHz以上で急落するため
+// 実用上は聞こえない。Nano 標準の490Hz/980Hz だと「ブーン」が可聴域に出る。
+//
+// Timer2 は millis() に影響しない（millis は Timer0）。tone() と競合するが
+// 本スケッチでは使っていない。
+//
+// 減速比が約1:360あり、必要トルクに対して数倍の余裕がある。
+// 遅くしても止まらない。ウォームのセルフロックも効いたままになる。
+const uint8_t MOTOR_DUTY = 150;   // 0〜255。150 ≒ 59% ≒ 平均2.9V
+
+// 低いデューティでは起動しきらないことがあるため、最初だけ全開で蹴る。
+const uint32_t KICK_MS = 150;
+
 // ---- 動作パラメータ --------------------------------------------------------
 // 1回転の実測時間。ここを変えれば下の2つが追従する。
 const uint32_t REV_MS = 2030;
@@ -86,11 +104,31 @@ uint32_t btnDownAt   = 0;      // 押し始めた時刻
 uint32_t releasedAt  = 0;      // 離れ始めた時刻。0 なら離れていない
 bool     longHandled = false;  // この押下で既に処理を実行したか
 
+// モーターを MOTOR_DUTY で回し始める。
+// 起動だけ全開で蹴ってから落とす。
+void motorOn() {
+  OCR2B = 255;
+  TCCR2A |= _BV(COM2B1);   // OC2B をピンに接続
+  delay(KICK_MS);
+  OCR2B = MOTOR_DUTY;
+}
+
+void motorOff() {
+  TCCR2A &= ~_BV(COM2B1);  // OC2B を切り離す
+  digitalWrite(PIN_MOTOR, LOW);
+}
+
 void setup() {
   // モーターを確実に止めてから出力に切り替える。
   // ハード側の10kΩプルダウンと合わせて二重に担保する。
   digitalWrite(PIN_MOTOR, LOW);
   pinMode(PIN_MOTOR, OUTPUT);
+
+  // Timer2 を分周なしの Fast PWM に設定（62.5kHz）。
+  // この時点では OC2B を接続しないので、モーターは止まったまま。
+  TCCR2A = _BV(WGM21) | _BV(WGM20);
+  TCCR2B = _BV(CS20);
+  OCR2B  = 0;
 
   pinMode(PIN_LED, OUTPUT);
   digitalWrite(PIN_LED, LOW);
@@ -140,8 +178,8 @@ bool reedCleared() {
 // これなら検出範囲の広さに関係なく、必ず1回転で止まる。
 void rotateOnce() {
   digitalWrite(PIN_LED, HIGH);
-  digitalWrite(PIN_MOTOR, HIGH);
   uint32_t t0 = millis();
+  motorOn();
 
   // 1. 磁石から離れるまで
   while (!reedCleared()) {
@@ -160,7 +198,7 @@ void rotateOnce() {
     }
   }
 
-  digitalWrite(PIN_MOTOR, LOW);
+  motorOff();
   digitalWrite(PIN_LED, LOW);
 }
 
@@ -171,8 +209,8 @@ void homing() {
   }
 
   digitalWrite(PIN_LED, HIGH);
-  digitalWrite(PIN_MOTOR, HIGH);
   uint32_t t0 = millis();
+  motorOn();
 
   while (!reedDetected()) {
     if (millis() - t0 >= HOMING_MAX_MS) {
@@ -180,7 +218,7 @@ void homing() {
     }
   }
 
-  digitalWrite(PIN_MOTOR, LOW);
+  motorOff();
   digitalWrite(PIN_LED, LOW);
 }
 
