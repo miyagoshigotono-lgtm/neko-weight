@@ -1,83 +1,42 @@
-// リードスイッチ動作確認スケッチ
-// ご飯アゲアゲ君 / Digispark (ATtiny85)
+// リードスイッチ確認用スケッチ
+// ご飯アゲアゲ君 / Arduino Nano (ATmega328P)
 //
-// ウォームギヤのセルフロックで手回しができないため、
-// モーターで回しながらリードスイッチの反応を確認する。
+// モーターを回さずにリードスイッチ単体を確認する。
+// D13 のオンボードLEDがリードの状態をそのまま映す。
 //
 // 使い方:
-//   パイプを空にしてからボタンを押す。モーターが回り出す。
+//   書き込んで通電し、磁石を近づけたり離したりする。
+//     磁石が近い → LED 点灯
+//     磁石が遠い → LED 消灯
 //
-// 判定:
-//   MAX_RUN_MS より前に止まった  → リードが反応している。
-//                                   止まるまでの秒数が1回転の時間。
-//   MAX_RUN_MS きっちり回り続けた → リードが反応していない。
-//                                   磁石が遠い、向きが悪い、
-//                                   またはリードスイッチの不良。
+// 見ること:
+//   1. そもそも反応するか（磁石の強さ・向き・距離）
+//   2. 何mmまで離すと消えるか。これが円板とリードの隙間の上限になる
+//   3. 磁石の向きを変えた時の感度の差
 //
-// 繰り返し押すと毎回同じ秒数で止まるはず。
-// 秒数がばらつく場合は磁石の検出が不安定なので、
-// 距離を詰めるか磁石を強いものに替える。
-
-const uint8_t PIN_MOTOR  = 1;
-const uint8_t PIN_BUTTON = 0;
-const uint8_t PIN_REED   = 2;
-
-// 検出を無視する時間。前回の停止位置が磁石の上だった場合に
-// 即停止してしまうのを防ぐ。1回転の時間より十分短く取る。
-const uint32_t DEADBAND_MS = 1000;
-
-// これを過ぎたら検出できなくても止める。
-// 1回転（実測 約2.03秒）より確実に長く、かつ餌が出過ぎない範囲で。
-const uint32_t MAX_RUN_MS = 15000;
-
-// この時間ずっと LOW が続いた時だけ検出とみなす。
-// モーターのブラシノイズによる瞬間的な誤検出を弾くための保険。
-// 本命はハード側（P2→5V に 5.1kΩ、P2→GND に 1µF）。
+// 磁石を回転と同じ動かし方で横切らせた時、ON→OFF→ON と2回反応する
+// 場合は、磁石の極方向とリード軸が平行になっていない。向きを90度変える。
 //
-// RC時定数 5.1kΩ × 1µF = 5.1ms に対して十分な余裕を取って 30ms。
-// 磁石の検出時間は数百msあるので、これでも十分短い。
-const uint32_t REED_STABLE_MS = 30;
+// 注意:
+//   D3（モーター）は能動的に LOW を出すので回らない。
+//   ハード側の10kΩプルダウンが外れていても止まったままになる。
 
-bool reedDetected() {
-  if (digitalRead(PIN_REED) == HIGH) {
-    return false;
-  }
-  const uint32_t s = millis();
-  while (millis() - s < REED_STABLE_MS) {
-    if (digitalRead(PIN_REED) == HIGH) {
-      return false;
-    }
-  }
-  return true;
-}
+const uint8_t PIN_MOTOR = 3;
+const uint8_t PIN_REED  = 5;
+const uint8_t PIN_LED   = 13;
 
 void setup() {
+  // モーターを確実に止めてから他を初期化する。
   digitalWrite(PIN_MOTOR, LOW);
   pinMode(PIN_MOTOR, OUTPUT);
-  pinMode(PIN_BUTTON, INPUT_PULLUP);
+
   pinMode(PIN_REED, INPUT_PULLUP);
+  pinMode(PIN_LED, OUTPUT);
 }
 
 void loop() {
-  if (digitalRead(PIN_BUTTON) != LOW) {
-    return;
-  }
-
-  // 押しっぱなしで連続始動しないよう、離されるまで待つ
-  while (digitalRead(PIN_BUTTON) == LOW) {
-  }
-
-  const uint32_t t0 = millis();
-  digitalWrite(PIN_MOTOR, HIGH);
-
-  while (millis() - t0 < DEADBAND_MS) {
-  }
-
-  while (!reedDetected()) {
-    if (millis() - t0 >= MAX_RUN_MS) {
-      break;
-    }
-  }
-
-  digitalWrite(PIN_MOTOR, LOW);
+  // リードの状態をそのまま LED に出す。
+  // ここでは連続判定をしない。生の反応を見るためのスケッチなので、
+  // チャタリングも含めてそのまま表示する。
+  digitalWrite(PIN_LED, digitalRead(PIN_REED) == LOW ? HIGH : LOW);
 }
