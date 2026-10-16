@@ -54,16 +54,13 @@ const uint32_t HOMING_MAX_MS = 5000;
 // リードが途中で反応しなくなった場合に止めるための保険。
 const uint32_t MEASURE_MAX_MS = 120000;
 
-// 磁石から離れた直後に再検出しないための不感帯。
-// 1回転の時間より十分短く取る。
-const uint32_t DEADBAND_MS = 1000;
-
-// この時間ずっと LOW が続いた時だけ検出とみなす。
-// RC時定数 5.1kΩ × 1µF = 5.1ms に対して余裕を取って 30ms。
-const uint32_t REED_STABLE_MS = 30;
+// この時間ずっと同じ状態が続いたら確定とみなす。
+// 本体側と同じ値にすること。判定方法が違うと測定値が本番と合わない。
+const uint32_t REED_STABLE_MS = 100;
 
 bool pressCount = false;  // false = 次は奇数回（原点出し）
 
+// 磁石を検出した（REED_STABLE_MS のあいだ連続で LOW）。
 bool reedDetected() {
   if (digitalRead(PIN_REED) == HIGH) {
     return false;
@@ -71,6 +68,20 @@ bool reedDetected() {
   const uint32_t s = millis();
   while (millis() - s < REED_STABLE_MS) {
     if (digitalRead(PIN_REED) == HIGH) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// 磁石から離れた（REED_STABLE_MS のあいだ連続で HIGH）。
+bool reedCleared() {
+  if (digitalRead(PIN_REED) == LOW) {
+    return false;
+  }
+  const uint32_t s = millis();
+  while (millis() - s < REED_STABLE_MS) {
+    if (digitalRead(PIN_REED) == LOW) {
       return false;
     }
   }
@@ -96,32 +107,32 @@ void homing() {
 }
 
 // REVS 回ぶん回して止まる。
+// 判定は本体の rotateOnce() と同じ「離れた確認 → 検出」の繰り返し。
+// 固定時間の不感帯は使わない。磁石の検出範囲が何度ぶんあるか分からないため、
+// 時間で待つと範囲の広さ次第で即検出してしまう。
 void measure() {
   const uint32_t t0 = millis();
   motorOn();
 
-  // 原点の磁石から離れるまで待つ
-  while (millis() - t0 < DEADBAND_MS) {
-  }
-
   uint8_t count = 0;
   while (count < REVS) {
-    if (millis() - t0 >= MEASURE_MAX_MS) {
-      break;
+    // 1. 磁石から離れるまで
+    while (!reedCleared()) {
+      if (millis() - t0 >= MEASURE_MAX_MS) {
+        motorOff();
+        return;
+      }
     }
 
-    if (reedDetected()) {
-      count++;
-      if (count >= REVS) {
-        break;
-      }
-      // 次を数える前に、磁石が検出範囲から抜けるのを待つ
-      while (digitalRead(PIN_REED) == LOW) {
-        if (millis() - t0 >= MEASURE_MAX_MS) {
-          break;
-        }
+    // 2. 次に磁石を検出するまで
+    while (!reedDetected()) {
+      if (millis() - t0 >= MEASURE_MAX_MS) {
+        motorOff();
+        return;
       }
     }
+
+    count++;
   }
 
   motorOff();
