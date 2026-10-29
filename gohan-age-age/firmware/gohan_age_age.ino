@@ -22,6 +22,9 @@ const uint8_t PIN_LED    = 13;  // オンボードLED。動作中に点灯
 // 部屋数と一致させること。実機のスクリューは6部屋。
 const uint8_t FEED_COUNT = 6;
 
+// 1回目の給餌で回す回転数。2回目以降は常に1回転。
+const uint8_t FIRST_FEED_REVS = 2;
+
 // ボタンを押してから何分後に出すか。要素数は FEED_COUNT と一致させること。
 // 先頭が 0 なので、ボタンを押した瞬間に1回目が出る。
 //
@@ -256,8 +259,13 @@ void loop() {
         // 「タイマーが始まった」という目に見える合図になる。
         startedAt = now;
         beatAt    = now;
-        rotateOnce();
-        fedCount = 1;
+
+        // 1回目だけ多めに回して、境目に残った餌を出し切る。
+        for (uint8_t i = 0; i < FIRST_FEED_REVS; i++) {
+          rotateOnce();
+        }
+
+        fedCount = 1;   // 回転数ではなく「給餌の回数」なので 1
         running  = (FEED_COUNT > 1);
       }
       // 進行中なら無視する。起点がリセットされて
