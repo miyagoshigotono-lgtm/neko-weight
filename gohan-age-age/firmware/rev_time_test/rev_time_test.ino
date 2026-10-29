@@ -12,11 +12,15 @@
 //     押した瞬間から止まるまでの時間を REVS で割れば1回転の時間になる。
 //
 // 測り方:
-//   1回目を押して原点出し。止まるのを待つ。
-//   2回目を押すのと同時にストップウォッチ開始。
-//   モーターが止まったらストップウォッチ停止。その秒数 ÷ REVS。
+//   シリアルモニタを 115200bps で開く。
+//   1回目のボタンで原点出し。2回目のボタンで REVS 回ぶん回る。
+//   1回転ごとの実測値と平均がシリアルに出る。
 //
 //   3回目以降も同じ手順で繰り返せる。何度か測って値が揃うか確認する。
+//
+// 電源:
+//   Nano の 5V ピンを 5Vライン から外し、USB から給電すること。
+//   外部5VとUSBを同時に繋ぐと2つの電源が押し合う。GND は共通のままでよい。
 //
 // 注意:
 //   パイプは空にしておく。REVS 回ぶんの餌が出る。
@@ -107,20 +111,24 @@ void homing() {
   motorOff();
 }
 
-// REVS 回ぶん回して止まる。
+// REVS 回ぶん回して止まる。1回転ごとの時間をシリアルに出す。
 // 判定は本体の rotateOnce() と同じ「離れた確認 → 検出」の繰り返し。
-// 固定時間の不感帯は使わない。磁石の検出範囲が何度ぶんあるか分からないため、
-// 時間で待つと範囲の広さ次第で即検出してしまう。
 void measure() {
+  Serial.println(F("--- measure ---"));
+
   const uint32_t t0 = millis();
   motorOn();
 
-  uint8_t count = 0;
+  uint32_t prev  = 0;   // 前回検出した時刻（t0 からの経過）
+  uint32_t sum   = 0;   // 2回目以降の合計
+  uint8_t  count = 0;
+
   while (count < REVS) {
     // 1. 磁石から離れるまで
     while (!reedCleared()) {
       if (millis() - t0 >= MEASURE_MAX_MS) {
         motorOff();
+        Serial.println(F("ABORT: 磁石から離れたと判定できない"));
         return;
       }
     }
@@ -129,19 +137,54 @@ void measure() {
     while (!reedDetected()) {
       if (millis() - t0 >= MEASURE_MAX_MS) {
         motorOff();
+        Serial.println(F("ABORT: 磁石を検出できない"));
         return;
       }
     }
 
+    const uint32_t at = millis() - t0;
+    const uint32_t d  = at - prev;
+    prev = at;
     count++;
+
+    Serial.print(count);
+    Serial.print(F(": "));
+    Serial.print(d);
+    Serial.print(F(" ms"));
+
+    // 1回目は起動の蹴り(KICK_MS)と原点からの出発を含むので平均から除く
+    if (count == 1) {
+      Serial.println(F("   (起動を含むので平均から除外)"));
+    } else {
+      sum += d;
+      Serial.println();
+    }
   }
 
   motorOff();
+
+  const uint32_t avg = sum / (REVS - 1);
+  Serial.print(F("average = "));
+  Serial.print(avg);
+  Serial.println(F(" ms"));
+  Serial.println(F("-> 本体の REV_MS にこの値を入れる"));
+  Serial.println();
 }
 
 void setup() {
   digitalWrite(PIN_MOTOR, LOW);
   pinMode(PIN_MOTOR, OUTPUT);
+
+  Serial.begin(115200);
+  while (!Serial && millis() < 2000) {
+  }
+  Serial.println();
+  Serial.println(F("=== rev time test ==="));
+  Serial.print(F("MOTOR_DUTY = "));
+  Serial.println(MOTOR_DUTY);
+  Serial.print(F("REVS       = "));
+  Serial.println(REVS);
+  Serial.println(F("1st button: homing / 2nd button: measure"));
 
   // D3 = OC2B。分周なし Fast PWM で 62.5kHz。
   TCCR2A = _BV(WGM21) | _BV(WGM20);
