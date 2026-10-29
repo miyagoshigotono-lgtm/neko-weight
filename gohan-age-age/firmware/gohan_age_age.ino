@@ -107,6 +107,13 @@ uint32_t btnDownAt   = 0;      // 押し始めた時刻
 uint32_t releasedAt  = 0;      // 離れ始めた時刻。0 なら離れていない
 bool     longHandled = false;  // この押下で既に処理を実行したか
 
+// スケジュール進行中であることを示す点滅。
+// 給餌が来ないときに「動いているのか、止まっているのか」を
+// シリアル無しで判別するための表示。消えていたら電源断かリセット。
+const uint32_t BEAT_PERIOD_MS = 3000;  // 3秒ごとに
+const uint32_t BEAT_ON_MS     = 60;    // 60ms だけ光る
+uint32_t beatAt = 0;
+
 // モーターを MOTOR_DUTY で回し始める。
 // 起動だけ全開で蹴ってから落とす。
 void motorOn() {
@@ -248,6 +255,7 @@ void loop() {
         // その場で1回目を出す。すぐ回ることが
         // 「タイマーが始まった」という目に見える合図になる。
         startedAt = now;
+        beatAt    = now;
         rotateOnce();
         fedCount = 1;
         running  = (FEED_COUNT > 1);
@@ -267,6 +275,18 @@ void loop() {
     }
   }
 
+  // ---- 進行中の表示 ----
+  // 3秒ごとに短く光る。消えていたら電源断かリセット。
+  if (running) {
+    uint32_t phase = now - beatAt;
+    if (phase >= BEAT_PERIOD_MS) {
+      beatAt = now;
+      digitalWrite(PIN_LED, HIGH);
+    } else if (phase >= BEAT_ON_MS) {
+      digitalWrite(PIN_LED, LOW);
+    }
+  }
+
   // ---- スケジュール ----
   if (running && fedCount < FEED_COUNT) {
     uint32_t due = (uint32_t)SCHEDULE[fedCount] * UNIT_MS;
@@ -275,6 +295,7 @@ void loop() {
       fedCount++;
       if (fedCount >= FEED_COUNT) {
         running = false;
+        digitalWrite(PIN_LED, LOW);
       }
     }
   }
