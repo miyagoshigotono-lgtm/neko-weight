@@ -28,7 +28,7 @@ const uint8_t PIN_REED   = 5;
 
 // 本体側の MOTOR_DUTY と必ず同じ値にすること。
 // 違う値で測ると、得られた REV_MS が本番の速度と合わない。
-const uint8_t  MOTOR_DUTY = 150;
+const uint8_t  MOTOR_DUTY = 100;
 const uint32_t KICK_MS    = 150;
 
 void motorOn() {
@@ -46,9 +46,10 @@ void motorOff() {
 // 計測する回転数。多いほど平均の精度が上がる。
 const uint8_t REVS = 10;
 
-// 原点出しの上限。1回転より短くてよい。
+// 原点出しの上限。1回転より長く取る。
+// デューティを下げると1回転が伸びるので、余裕を持たせてある。
 // これを使い切った場合はリードが反応していない。
-const uint32_t HOMING_MAX_MS = 5000;
+const uint32_t HOMING_MAX_MS = 15000;
 
 // 計測の上限（全 REVS 回ぶんの合計）。
 // リードが途中で反応しなくなった場合に止めるための保険。
